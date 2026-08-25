@@ -8,6 +8,7 @@ export {
   LinkTransportError,
 } from './errors';
 export * from './resources/attestations';
+export * from './resources/credentials';
 export * from './resources/interfaces';
 export { getDuplicateSpendRequest } from './resources/spend-request';
 export * from './types/index';

@@ -38,6 +38,24 @@ export interface IAttestationsResource {
   request(params: AttestationRequestParams): Promise<AttestationRequestResult>;
 }
 
+export type HolderPublicJwk =
+  | { kty: 'OKP'; crv: 'Ed25519'; x: string }
+  | { kty: 'EC'; crv: 'P-256'; x: string; y: string };
+
+export interface CredentialIssueParams {
+  cnf: { jwk: HolderPublicJwk };
+}
+
+export interface CredentialIssueResponse {
+  credential: string;
+  issuer: string;
+  expires_at: string;
+}
+
+export interface ICredentialsResource {
+  issue(params: CredentialIssueParams): Promise<CredentialIssueResponse>;
+}
+
 export interface CreateSpendRequestParams {
   idempotency_key?: string;
   payment_details?: string;

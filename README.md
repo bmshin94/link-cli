@@ -258,6 +258,15 @@ LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10
 
 Attestation tokens can be used to respond to attestation challenges presented by downstream services. Token artifacts are written to `~/.link-cli/attestations`.
 
+### Identity credential wallet
+
+```bash
+link-cli credentials issue
+link-cli credentials issue --key-file ~/.link/holder-key.jwk --key-type ed25519
+```
+
+`credentials issue` provisions a short-lived SD-JWT-VC bound to a locally persisted holder key. The SDK discovers the issuer's `credential_endpoint` through `/.well-known/aap-issuer`; it never assumes a fixed credential path.
+
 ### Spend request lifecycle
 
 A spend request moves through: **create** → **request approval** → **approved** (with credentials).
