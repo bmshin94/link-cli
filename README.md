@@ -299,6 +299,15 @@ LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get --public-key-file ./h
 
 `identity credentials get` fetches that signed user info. With `--key-file` (or the default `~/.link/holder-key.jwk`), the CLI keeps a local private key so it can present the same wallet of claims later. With `--public-key-file`, the CLI sends only that public JWK and never reads or creates a private key — the agent retains the matching private key and signs presentations itself. `--key-file` and `--public-key-file` cannot be combined; `--key-type` applies only when generating a CLI-managed key. `--output-file` writes the credential artifact as JSON (0600; use `--force` to overwrite). Link tells the CLI where to request it; there is no fixed path to hard-code.
 
+### Identity-aware HTTP requests
+
+```bash
+link-cli request https://merchant.example/checkout
+link-cli request https://merchant.example/checkout --claims email,given_name
+```
+
+When the HTTPS origin returns an AAP `Identity-Presentation` challenge, `request` provisions a holder-bound credential, selects only the requested claims, validates the audience/format/trusted issuer, and retries with both the presentation and a request-specific Web Bot Auth signature. Redirects are not followed.
+
 ### Spend request lifecycle
 
 A spend request moves through: **create** → **request approval** → **approved** (with credentials).
