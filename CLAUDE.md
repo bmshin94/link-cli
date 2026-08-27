@@ -137,7 +137,7 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 - `--output-file` writes the versioned credential artifact as JSON (0600; `--force` to overwrite). The issued `cnf.jwk` is checked against the requested public key before returning.
 - Requires `userinfo:read` and `payment_methods.agentic`; no additional OAuth scope is required.
 
-### request command (AAP)
+### request command
 
 `request <url> [--claims "a,b,c"] [-X <method>] [-d <body>] [-H <header>]... [--key-file <path>] [--key-type ed25519|p256]` — satisfies a pre-provisioned identity-claims challenge and retries with a holder-bound presentation. HTTPS is required except for loopback development.
 
