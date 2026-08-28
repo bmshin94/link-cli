@@ -289,16 +289,14 @@ LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10 --out
 
 `identity attestations request` asks Link for tokens (`--count` 1–100) and returns each complete base64url token with its issuer and issuer token-key identifier. Send a token as `Authorization: PrivateToken token="<token>"` — the command includes that header value on each token. You can pass an HTTPS `--issuer` and an `--access-token`; otherwise stored login credentials are used. Issuer discovery and issuance stay on the issuer's HTTPS DNS origin; redirects and IP-literal hosts are rejected. `--output-file` writes the artifact as JSON (0600; use `--force` to overwrite).
 
-### Identity credential wallet
-
-Unlisted command: set `LINK_IDENTITY_COMMANDS=1` to enable it. It is omitted from `--help`, `--llms`, and MCP tool lists otherwise.
+User info that has been signed, proving it comes from Link:
 
 ```bash
-LINK_IDENTITY_COMMANDS=1 link-cli credentials issue
-LINK_IDENTITY_COMMANDS=1 link-cli credentials issue --key-file ~/.link/holder-key.jwk --key-type ed25519
+LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get
+LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get --key-file ~/.link/holder-key.jwk --key-type ed25519
 ```
 
-`credentials issue` provisions a short-lived SD-JWT-VC bound to a locally persisted holder key. The SDK discovers the issuer's `credential_endpoint` from issuer metadata; it never assumes a fixed credential path.
+`identity credentials get` fetches that signed user info and keeps a local key so you can present the same wallet of claims later. Link tells the CLI where to request it; there is no fixed path to hard-code.
 
 ### Spend request lifecycle
 
