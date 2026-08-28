@@ -18,14 +18,22 @@ export function createAttestationsCli(
     mcp: false,
     outputPolicy: 'agent-only' as const,
     async run(c) {
-      const { count, issuer, accessToken, outputFile, force } = c.options;
+      const { count, issuer, accessToken, poolFile, outputFile, force } =
+        c.options;
+      const { remainingCount, saveIssuedTokens } = await import('./pool');
 
-      const result = exportAttestationTokens(
-        await createResource(accessToken).request({
-          issuer,
-          count,
-        }),
-      );
+      const issued = await createResource(accessToken).request({
+        issuer,
+        count,
+      });
+      saveIssuedTokens(poolFile, issued);
+      const result = {
+        ...exportAttestationTokens(issued),
+        pool: {
+          path: poolFile,
+          remaining: remainingCount(poolFile),
+        },
+      };
       if (outputFile) {
         const { writeCredentialFile } = await import(
           '../../utils/credential-output'
