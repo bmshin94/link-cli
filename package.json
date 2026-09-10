@@ -25,7 +25,10 @@
     "onlyBuiltDependencies": [
       "@biomejs/biome",
       "esbuild"
-    ]
+    ],
+    "patchedDependencies": {
+      "incur@0.4.26": "patches/incur@0.4.26.patch"
+    }
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,366 @@
+diff --git a/dist/Cli.d.ts b/dist/Cli.d.ts
+index 77641c613e3c33074b302ebfe66100e68e79ae09..a5c42a7d5d1de94ba8b3bcdc3b6d1e7d28260640 100644
+--- a/dist/Cli.d.ts
++++ b/dist/Cli.d.ts
+@@ -231,6 +231,8 @@ export declare namespace create {
+             /** Variables set by middleware. */
+             var: InferVars<vars>;
+         }) => InferReturn<output> | Promise<InferReturn<output>> | AsyncGenerator<InferReturn<output>, unknown, unknown>) | undefined;
++        /** Trusted registry package name, supplied by the CLI build rather than inferred from dependencies. */
++        packageName?: string | undefined;
+         /** Options for MCP integration. */
+         mcp?: {
+             /** Target specific agents by default (e.g. `['claude-code', 'cursor']`). */
+diff --git a/dist/Cli.js b/dist/Cli.js
+index 4b80e74d959f6508ea4de6cc79e372f111b2b6b6..665ee72b35b65d4c6c8a3fbe0a210178d9bacf85 100644
+--- a/dist/Cli.js
++++ b/dist/Cli.js
+@@ -173,6 +173,7 @@ export function create(nameOrDefinition, definition) {
+                 format: def.format,
+                 globals: globalsDesc,
+                 mcp: def.mcp,
++                packageName: def.packageName,
+                 middlewares,
+                 outputPolicy: def.outputPolicy,
+                 rootCommand: rootDef,
+@@ -423,9 +424,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+                 const groups = new Map();
+                 const entries = collectSkillCommands(commands, [], groups, options.rootCommand);
+                 if (Skill.hash(entries) !== stored) {
+-                    const command = process.env.npm_config_user_agent || process.env.npm_execpath
+-                        ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
+-                        : `${displayName} skills add`;
++                    const command = `${detectRunner()} ${SyncMcp.detectPackageSpecifier(options.packageName, options.version)} skills add`;
+                     skillsCta = {
+                         description: 'Skills are out of date:',
+                         commands: [{ command, description: 'sync outdated skills' }],
+@@ -711,7 +710,8 @@ async function serveImpl(name, commands, argv, options = {}) {
+             const mcpName = options.mcp?.name ?? name;
+             stdout('Registering MCP server...');
+             const result = await SyncMcp.register(mcpName, {
+-                ...(mcpName === name ? undefined : { cli: name }),
++                packageName: options.packageName,
++                version: options.version,
+                 command,
+                 global,
+                 agents,
+diff --git a/dist/Mcp.js b/dist/Mcp.js
+index d916f16d0d3789a809d7a90d88ed6de7844708fd..2b8d44b32532215f9d3d03df7a4ff51983333ec7 100644
+--- a/dist/Mcp.js
++++ b/dist/Mcp.js
+@@ -36,11 +36,10 @@ async function importStdioServerTransport(mcp, stdio) {
+     return result.module.StdioServerTransport;
+ }
+ function importStdioModule() {
+-    return importModule('@modelcontextprotocol/server/stdio')
++    return import('@modelcontextprotocol/server/stdio')
+         .then((module) => ({ module }))
+         .catch((error) => ({ error }));
+ }
+-const importModule = (specifier) => import(specifier);
+ /** @internal Executes a tool call and returns a CallToolResult. */
+ export async function callTool(tool, params, options = {}) {
+     const allMiddleware = [
+diff --git a/dist/SyncMcp.d.ts b/dist/SyncMcp.d.ts
+index 74aba84f2d78fe9d717b0205fe171c4e25b27584..dcdab7e307ac71d988d1fcfc293e2472b2f39de8 100644
+--- a/dist/SyncMcp.d.ts
++++ b/dist/SyncMcp.d.ts
+@@ -5,8 +5,10 @@ export declare namespace register {
+     type Options = {
+         /** Target specific agents (e.g. `'claude-code'`, `'cursor'`). */
+         agents?: string[] | undefined;
+-        /** CLI name used to derive the default command. Defaults to the MCP server name. */
+-        cli?: string | undefined;
++        /** Trusted registry package name supplied by the CLI build. */
++        packageName?: string | undefined;
++        /** Exact version supplied by the CLI build. */
++        version?: string | undefined;
+         /** Override the command agents will run. Defaults to `<runner> <name> --mcp`. */
+         command?: string | undefined;
+         /** Install globally. Defaults to `true`. */
+@@ -20,6 +22,6 @@ export declare namespace register {
+         command: string;
+     };
+ }
+-/** @internal Detects the package specifier used to run this CLI (handles dlx/npx URL and version installs). */
+-export declare function detectPackageSpecifier(name: string): string;
++/** @internal Builds a registry specifier exclusively from explicit package identity. */
++export declare function detectPackageSpecifier(name: string | undefined, version: string | undefined): string;
+ //# sourceMappingURL=SyncMcp.d.ts.map
+diff --git a/dist/SyncMcp.js b/dist/SyncMcp.js
+index 7aa6ed1a22e544410ca66f6ddeb58e96c9da7269..57c52b485b8b3ecfb596629d8a3709ff92e4b739 100644
+--- a/dist/SyncMcp.js
++++ b/dist/SyncMcp.js
+@@ -6,7 +6,7 @@ import { detectRunner } from './internal/pm.js';
+ /** Registers the CLI as an MCP server via `npx add-mcp` and direct config writes for unsupported agents. */
+ export async function register(name, options = {}) {
+     const runner = detectRunner();
+-    const command = options.command ?? defaultCommand(options.cli ?? name, runner);
++    const command = options.command ?? `${runner} ${detectPackageSpecifier(options.packageName, options.version)} --mcp`;
+     const targetAgents = options.agents ?? [];
+     const ampOnly = targetAgents.length === 1 && targetAgents[0] === 'amp';
+     const agents = [];
+@@ -62,65 +62,25 @@ function registerAmp(name, command) {
+     writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+     return true;
+ }
+-/** @internal Builds the default MCP command for the current launch mode. */
+-function defaultCommand(name, runner) {
+-    return shouldUseBareCommand(name)
+-        ? `${name} --mcp`
+-        : `${runner} ${detectPackageSpecifier(name)} --mcp`;
+-}
+-/** @internal Returns node_modules path details for the current entrypoint. */
+-function nodeModulesInfo() {
+-    const normalized = process.argv[1]?.replace(/\\/g, '/');
+-    const match = normalized?.match(/^(.+)\/node_modules\/(.+)$/);
+-    if (!match)
+-        return null;
+-    return { root: match[1], entry: match[2] };
+-}
+-/** @internal Uses the bare command only when the binary is expected on PATH. */
+-function shouldUseBareCommand(name) {
+-    const bin = process.argv[1];
+-    if (!bin)
+-        return false;
+-    const info = nodeModulesInfo();
+-    if (info)
+-        return !info.entry.startsWith('.bin/') && !packageDependsOn(info.root, name);
+-    const file = bin.replace(/\\/g, '/').split('/').pop();
+-    return file === name || file === `${name}.cmd` || file === `${name}.ps1`;
+-}
+-/** @internal Checks whether the entrypoint came from a project dependency install. */
+-function packageDependsOn(root, name) {
+-    try {
+-        const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+-        const dependencyFields = [
+-            pkg.dependencies,
+-            pkg.devDependencies,
+-            pkg.optionalDependencies,
+-            pkg.peerDependencies,
+-        ];
+-        return dependencyFields.some((dependencies) => name in (dependencies ?? {}));
+-    }
+-    catch {
+-        return false;
+-    }
+-}
+-/** @internal Detects the package specifier used to run this CLI (handles dlx/npx URL and version installs). */
+-export function detectPackageSpecifier(name) {
+-    const info = nodeModulesInfo();
+-    if (!info)
+-        return name;
+-    try {
+-        const pkg = JSON.parse(readFileSync(join(info.root, 'package.json'), 'utf-8'));
+-        const deps = pkg.dependencies ?? {};
+-        const spec = deps[name];
+-        if (!spec || Object.keys(deps).length !== 1)
+-            return name;
+-        if (/^https?:\/\//.test(spec) || spec.startsWith('file:'))
+-            return spec;
+-        if (/^\d/.test(spec))
+-            return `${name}@${spec}`;
+-    }
+-    catch { }
+-    return name;
++/** @internal Builds a registry specifier exclusively from explicit package identity. */
++export function detectPackageSpecifier(name, version) {
++  // Never use a surrounding project's package.json, lockfile, or argv to select executable code.
++  const packageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
++  const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
++  const match = typeof version === 'string' ? exactVersion.exec(version) : null
++  const prerelease = match?.[4]?.split('.') ?? []
++  if (
++    typeof name !== 'string' ||
++    name.length > 214 ||
++    !packageName.test(name) ||
++    /\s/.test(name) ||
++    !match ||
++    /\s/.test(version) ||
++    prerelease.some((part) => /^0\d+$/.test(part))
++  ) {
++    throw new Error('An explicit packageName and exact version are required for package commands')
++  }
++  return `${name}@${version}`
+ }
+ /** Splits a command string into tokens, respecting single and double quotes. */
+ function splitCommand(input) {
+diff --git a/src/Cli.ts b/src/Cli.ts
+index a99a85b5311ed12a78d78e3e901ba6cf1ca9d733..c55d71247d225e4092ee2de2dd1c68b65e843112 100644
+--- a/src/Cli.ts
++++ b/src/Cli.ts
+@@ -400,6 +400,7 @@ export function create(
+         format: def.format,
+         globals: globalsDesc,
+         mcp: def.mcp,
++        packageName: def.packageName,
+         middlewares,
+         outputPolicy: def.outputPolicy,
+         rootCommand: rootDef,
+@@ -595,6 +596,8 @@ export declare namespace create {
+           | Promise<InferReturn<output>>
+           | AsyncGenerator<InferReturn<output>, unknown, unknown>)
+       | undefined
++    /** Trusted registry package name, supplied by the CLI build rather than inferred from dependencies. */
++    packageName?: string | undefined
+     /** Options for MCP integration. */
+     mcp?:
+       | {
+@@ -889,10 +892,7 @@ async function serveImpl(
+         const groups = new Map<string, string>()
+         const entries = collectSkillCommands(commands, [], groups, options.rootCommand)
+         if (Skill.hash(entries) !== stored) {
+-          const command =
+-            process.env.npm_config_user_agent || process.env.npm_execpath
+-              ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
+-              : `${displayName} skills add`
++          const command = `${detectRunner()} ${SyncMcp.detectPackageSpecifier(options.packageName, options.version)} skills add`
+           skillsCta = {
+             description: 'Skills are out of date:',
+             commands: [{ command, description: 'sync outdated skills' }],
+@@ -1202,7 +1202,8 @@ async function serveImpl(
+       const mcpName = options.mcp?.name ?? name
+       stdout('Registering MCP server...')
+       const result = await SyncMcp.register(mcpName, {
+-        ...(mcpName === name ? undefined : { cli: name }),
++        packageName: options.packageName,
++        version: options.version,
+         command,
+         global,
+         agents,
+@@ -2576,6 +2577,7 @@ function resolveCommand(
+ /** @internal Options for serveImpl, extending public serve.Options with internal metadata. */
+ declare namespace serveImpl {
+   type Options = serve.Options & {
++    packageName?: string | undefined
+     /** Alternative binary names for this CLI. */
+     aliases?: string[] | undefined
+     config?:
+diff --git a/src/Mcp.ts b/src/Mcp.ts
+index 21688d74f971f1fb33d95b506c6d516ed8dfee64..9f7d446879221b595a00b11855305dc8bf932dc5 100644
+--- a/src/Mcp.ts
++++ b/src/Mcp.ts
+@@ -70,12 +70,11 @@ async function importStdioServerTransport(
+ }
+ 
+ function importStdioModule(): Promise<StdioImportResult> {
+-  return importModule('@modelcontextprotocol/server/stdio')
++  return import('@modelcontextprotocol/server/stdio')
+     .then((module) => ({ module }))
+     .catch((error: unknown) => ({ error }))
+ }
+ 
+-const importModule = (specifier: string): Promise<unknown> => import(specifier)
+ 
+ export declare namespace serve {
+   /** Options for the MCP server. */
+diff --git a/src/SyncMcp.ts b/src/SyncMcp.ts
+index 6b0e546633d94c20fc1813b2f567cf444a754752..7b95af43a0c3c89df8a3cf06e9959f2fa1cb4bee 100644
+--- a/src/SyncMcp.ts
++++ b/src/SyncMcp.ts
+@@ -11,7 +11,7 @@ export async function register(
+   options: register.Options = {},
+ ): Promise<register.Result> {
+   const runner = detectRunner()
+-  const command = options.command ?? defaultCommand(options.cli ?? name, runner)
++  const command = options.command ?? `${runner} ${detectPackageSpecifier(options.packageName, options.version)} --mcp`
+   const targetAgents = options.agents ?? []
+   const ampOnly = targetAgents.length === 1 && targetAgents[0] === 'amp'
+ 
+@@ -83,8 +83,10 @@ export declare namespace register {
+   type Options = {
+     /** Target specific agents (e.g. `'claude-code'`, `'cursor'`). */
+     agents?: string[] | undefined
+-    /** CLI name used to derive the default command. Defaults to the MCP server name. */
+-    cli?: string | undefined
++    /** Trusted registry package name supplied by the CLI build. */
++    packageName?: string | undefined
++    /** Exact version supplied by the CLI build. */
++    version?: string | undefined
+     /** Override the command agents will run. Defaults to `<runner> <name> --mcp`. */
+     command?: string | undefined
+     /** Install globally. Defaults to `true`. */
+@@ -100,65 +102,25 @@ export declare namespace register {
+   }
+ }
+ 
+-/** @internal Builds the default MCP command for the current launch mode. */
+-function defaultCommand(name: string, runner: string): string {
+-  return shouldUseBareCommand(name)
+-    ? `${name} --mcp`
+-    : `${runner} ${detectPackageSpecifier(name)} --mcp`
+-}
+-
+-/** @internal Returns node_modules path details for the current entrypoint. */
+-function nodeModulesInfo(): { entry: string; root: string } | null {
+-  const normalized = process.argv[1]?.replace(/\\/g, '/')
+-  const match = normalized?.match(/^(.+)\/node_modules\/(.+)$/)
+-  if (!match) return null
+-  return { root: match[1]!, entry: match[2]! }
+-}
+-
+-/** @internal Uses the bare command only when the binary is expected on PATH. */
+-function shouldUseBareCommand(name: string): boolean {
+-  const bin = process.argv[1]
+-  if (!bin) return false
+-
+-  const info = nodeModulesInfo()
+-  if (info) return !info.entry.startsWith('.bin/') && !packageDependsOn(info.root, name)
+-
+-  const file = bin.replace(/\\/g, '/').split('/').pop()
+-  return file === name || file === `${name}.cmd` || file === `${name}.ps1`
+-}
+-
+-/** @internal Checks whether the entrypoint came from a project dependency install. */
+-function packageDependsOn(root: string, name: string): boolean {
+-  try {
+-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'))
+-    const dependencyFields = [
+-      pkg.dependencies,
+-      pkg.devDependencies,
+-      pkg.optionalDependencies,
+-      pkg.peerDependencies,
+-    ]
+-    return dependencyFields.some((dependencies) => name in (dependencies ?? {}))
+-  } catch {
+-    return false
++/** @internal Builds a registry specifier exclusively from explicit package identity. */
++export function detectPackageSpecifier(name: string | undefined, version: string | undefined): string {
++  // Never use a surrounding project's package.json, lockfile, or argv to select executable code.
++  const packageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
++  const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
++  const match = typeof version === 'string' ? exactVersion.exec(version) : null
++  const prerelease = match?.[4]?.split('.') ?? []
++  if (
++    typeof name !== 'string' ||
++    name.length > 214 ||
++    !packageName.test(name) ||
++    /\s/.test(name) ||
++    !match ||
++    /\s/.test(version!) ||
++    prerelease.some((part) => /^0\d+$/.test(part))
++  ) {
++    throw new Error('An explicit packageName and exact version are required for package commands')
+   }
+-}
+-
+-/** @internal Detects the package specifier used to run this CLI (handles dlx/npx URL and version installs). */
+-export function detectPackageSpecifier(name: string): string {
+-  const info = nodeModulesInfo()
+-  if (!info) return name
+-
+-  try {
+-    const pkg = JSON.parse(readFileSync(join(info.root, 'package.json'), 'utf-8'))
+-    const deps = pkg.dependencies ?? {}
+-    const spec = deps[name]
+-    if (!spec || Object.keys(deps).length !== 1) return name
+-
+-    if (/^https?:\/\//.test(spec) || spec.startsWith('file:')) return spec
+-    if (/^\d/.test(spec)) return `${name}@${spec}`
+-  } catch {}
+-
+-  return name
++  return `${name}@${version}`
+ }
+ 
+ /** Splits a command string into tokens, respecting single and double quotes. */

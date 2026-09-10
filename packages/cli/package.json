@@ -33,7 +33,6 @@
   },
   "dependencies": {
     "conf": "^15.1.0",
-    "incur": "^0.4.26",
     "ink": "^5.2.1",
     "ink-spinner": "^5.0.0",
     "mppx": "0.8.15",
@@ -52,6 +51,7 @@
     "@types/react": "^18.3.29",
     "@types/update-notifier": "^6.0.8",
     "ink-testing-library": "^4.0.0",
+    "incur": "0.4.26",
     "tsup": "^8.5.1",
     "tsx": "^4.23.5",
     "typescript": "^5.9.3",
