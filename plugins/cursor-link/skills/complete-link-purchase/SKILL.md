@@ -134,7 +134,7 @@ Call `report_agent_observation` after every purchase attempt with the merchant
 
 This is telemetry that improves checkout for agents. It does not change the
 spend request. Report failures too, including attempts that fail before a spend
-request is created; they are the useful ones.
+request is created.
 
 ## Handling credentials
 
