@@ -1,5 +1,5 @@
-import { UserInfoResource } from '@/resources/user-info';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { UserInfoResource } from '@/resources/user-info';
 
 const mockFetch = vi.fn();
 const getAccessToken = vi.fn();
@@ -68,6 +68,78 @@ describe('UserInfoResource', () => {
     });
   });
 
+  it('preserves Agent Wallet spend limits and maps the verification requirement', async () => {
+    const agentWalletSpendLimits = {
+      per_transaction: { limit: 50000 },
+      daily: { limit: 500000, used: 120000, remaining: 380000 },
+      thirty_day: {
+        limit: 2000000,
+        used: 600000,
+        remaining: 1400000,
+      },
+    };
+    const agentWalletStepUp = {
+      status: 'identity_verification',
+      action_url:
+        'https://app.link.com/finish_setup?verify=identity_verification&intended_email=user%40example.com&fromEmail=user%40example.com',
+    };
+    mockFetchResponse(200, {
+      email: 'user@example.com',
+      name: 'Test User',
+      first_name: 'Test',
+      last_name: 'User',
+      phone: '+15551234567',
+      agent_wallet_spend_limits: agentWalletSpendLimits,
+      agent_wallet_step_up: agentWalletStepUp,
+    });
+
+    const result = await resource.retrieve();
+
+    expect(result).toEqual({
+      email: 'user@example.com',
+      name: 'Test User',
+      first_name: 'Test',
+      last_name: 'User',
+      phone: '+15551234567',
+      agent_wallet_spend_limits: agentWalletSpendLimits,
+      agent_wallet_verification_requirement: agentWalletStepUp,
+    });
+  });
+
+  it('preserves unlimited limits and numeric usage', async () => {
+    mockFetchResponse(200, {
+      agent_wallet_spend_limits: {
+        per_transaction: { limit: null },
+        daily: { limit: null, used: 0, remaining: null },
+        thirty_day: { limit: null, used: 12345, remaining: null },
+      },
+    });
+
+    const result = await resource.retrieve();
+
+    expect(result.agent_wallet_spend_limits).toEqual({
+      per_transaction: { limit: null },
+      daily: { limit: null, used: 0, remaining: null },
+      thirty_day: { limit: null, used: 12345, remaining: null },
+    });
+  });
+
+  it('keeps independently omitted enrichment fields undefined', async () => {
+    mockFetchResponse(200, {
+      email: 'user@example.com',
+      agent_wallet_step_up: { status: 'not_required', action_url: null },
+    });
+
+    const result = await resource.retrieve();
+
+    expect(result.agent_wallet_spend_limits).toBeUndefined();
+    expect(result.agent_wallet_verification_requirement).toEqual({
+      status: 'not_required',
+      action_url: null,
+    });
+    expect(result).not.toHaveProperty('agent_wallet_spend_limits');
+  });
+
   it('handles null fields gracefully', async () => {
     mockFetchResponse(200, {
       email: null,
@@ -100,6 +172,10 @@ describe('UserInfoResource', () => {
       last_name: null,
       phone: null,
     });
+    expect(result.agent_wallet_spend_limits).toBeUndefined();
+    expect(result.agent_wallet_verification_requirement).toBeUndefined();
+    expect(result).not.toHaveProperty('agent_wallet_spend_limits');
+    expect(result).not.toHaveProperty('agent_wallet_verification_requirement');
   });
 
   it('refreshes the token and retries once on 401', async () => {

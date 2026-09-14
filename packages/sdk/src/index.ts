@@ -7,7 +7,6 @@ export {
   LinkSdkError,
   LinkTransportError,
 } from './errors';
-export * from './types/index';
 export * from './resources/interfaces';
 export * from './resources/attestations';
 export {
@@ -37,3 +36,4 @@ export type {
   PreparedKbJwt,
 } from './resources/sd-jwt-kb';
 export { getDuplicateSpendRequest } from './resources/spend-request';
+export * from './types/index';

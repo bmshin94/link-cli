@@ -1,4 +1,3 @@
-import { LinkApiError, getDuplicateSpendRequest } from '@stripe/link-sdk';
 import type {
   CredentialType,
   ISpendRequestResource,
@@ -6,6 +5,7 @@ import type {
   SpendRequest,
   Total,
 } from '@stripe/link-sdk';
+import { getDuplicateSpendRequest, LinkApiError } from '@stripe/link-sdk';
 import { Cli, z } from 'incur';
 import React from 'react';
 import type { CliAuthStorage } from '../../auth/storage';
@@ -18,6 +18,7 @@ import {
 import { pollUntil } from '../../utils/poll-until';
 import { renderInteractive } from '../../utils/render-interactive';
 import { requireAuth, requireAuthGuard } from '../../utils/require-auth';
+import { shellQuote } from '../../utils/shell-quote';
 import { CancelSpendRequest } from './cancel';
 import { CreateSpendRequest } from './create';
 import { SpendRequestList } from './list';
@@ -38,11 +39,11 @@ function buildRequiresActionResult(request: SpendRequest) {
   return {
     ...request,
     instruction: isAutoResume
-      ? `The spend request requires 3D Secure verification. Present action_url (${nextAction?.action_url}) to the user, then call \`spend-request retrieve ${request.id} --interval 2 --max-attempts 300\` to poll until it resolves. Do not create a new spend request — this one resumes automatically once the challenge is completed.`
+      ? `The spend request requires 3D Secure verification. Present action_url (${nextAction?.action_url}) to the user, then call \`spend-request retrieve ${shellQuote(request.id)} --interval 2 --max-attempts 300\` to poll until it resolves. Do not create a new spend request — this one resumes automatically once the challenge is completed.`
       : `The spend request requires action (${nextAction?.type}): ${nextAction?.display_message}${nextAction?.action_url ? ` URL: ${nextAction.action_url}` : ''} Have the user complete this, then create a new spend request.`,
     _next: isAutoResume
       ? {
-          command: `spend-request retrieve ${request.id} --interval 2 --max-attempts 300`,
+          command: `spend-request retrieve ${shellQuote(request.id)} --interval 2 --max-attempts 300`,
           until: 'status changes from requires_action',
         }
       : undefined,
@@ -158,11 +159,11 @@ export function createSpendRequestCli(
               'test cannot be used when execution-method is link_pay_token',
           });
         }
-        if (opts.approve) {
+        if (opts.approve && requestApproval) {
           return c.error({
             code: 'INVALID_INPUT',
             message:
-              'approve cannot be used when execution-method is link_pay_token; use request-approval instead',
+              '--approve with --execution-method link_pay_token requires --no-request-approval',
           });
         }
         if (opts.merchantName || opts.merchantUrl) {
@@ -253,6 +254,7 @@ export function createSpendRequestCli(
       }
 
       const createParams = {
+        idempotency_key: opts.idempotencyKey,
         payment_details: opts.paymentMethodId,
         credential_type: credentialType,
         network_id: networkId,
@@ -277,12 +279,13 @@ export function createSpendRequestCli(
       const forceOverwrite = opts.force;
 
       if (!c.agent && !c.formatExplicit) {
-        let capturedResult: SpendRequest | null | undefined = undefined;
+        let capturedResult: SpendRequest | null | undefined;
         return renderInteractive(
           <CreateSpendRequest
             repository={repository}
             params={createParams}
             requestApproval={requestApproval}
+            approve={opts.approve ? true : undefined}
             outputFile={outputFile}
             force={forceOverwrite}
             onComplete={(result) => {
@@ -363,9 +366,9 @@ export function createSpendRequestCli(
       }
       yield {
         ...created,
-        instruction: `Present the approval_url to the user and ask them to approve in the Link app. Then call \`spend-request retrieve ${created.id} --interval 2 --max-attempts 300\` to poll until approved. Do not wait for the user to reply — start polling immediately.`,
+        instruction: `Present the approval_url to the user and ask them to approve in the Link app. Then call \`spend-request retrieve ${shellQuote(created.id)} --interval 2 --max-attempts 300\` to poll until approved. Do not wait for the user to reply — start polling immediately.`,
         _next: {
-          command: `spend-request retrieve ${created.id} --interval 2 --max-attempts 300`,
+          command: `spend-request retrieve ${shellQuote(created.id)} --interval 2 --max-attempts 300`,
           until: 'status changes from pending_approval',
         },
       };
@@ -401,6 +404,9 @@ export function createSpendRequestCli(
         params.totals = opts.total.map((item: unknown) =>
           typeof item === 'string' ? parseTotalFlag(item) : item,
         );
+      if (opts.approve !== undefined) {
+        params.approve = opts.approve;
+      }
 
       if (!c.agent && !c.formatExplicit) {
         let capturedResult: SpendRequest | null = null;
@@ -437,7 +443,7 @@ export function createSpendRequestCli(
       const id = c.args.id;
 
       if (!c.agent && !c.formatExplicit) {
-        let capturedResult: SpendRequest | null | undefined = undefined;
+        let capturedResult: SpendRequest | null | undefined;
         return renderInteractive(
           <RequestApproval
             repository={repository}
@@ -486,9 +492,9 @@ export function createSpendRequestCli(
       }
       yield {
         ...approval,
-        instruction: `Present the approval_url to the user and ask them to approve in the Link app. Then call \`spend-request retrieve ${id} --interval 2 --max-attempts 300\` to poll until approved. Do not wait for the user to reply — start polling immediately.`,
+        instruction: `Present the approval_url to the user and ask them to approve in the Link app. Then call \`spend-request retrieve ${shellQuote(id)} --interval 2 --max-attempts 300\` to poll until approved. Do not wait for the user to reply — start polling immediately.`,
         _next: {
-          command: `spend-request retrieve ${id} --interval 2 --max-attempts 300`,
+          command: `spend-request retrieve ${shellQuote(id)} --interval 2 --max-attempts 300`,
           until: 'status changes from pending_approval',
         },
       };

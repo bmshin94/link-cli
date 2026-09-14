@@ -7,16 +7,18 @@ import React from 'react';
 import type { CliAuthStorage } from '../../auth/storage';
 import { renderInteractive } from '../../utils/render-interactive';
 import { requireAuth } from '../../utils/require-auth';
+import { shellCommand, shellQuote } from '../../utils/shell-quote';
 import { decodeStripeChallenge } from './decode';
 import { DecodeChallengeView } from './decode-view';
 import {
+  buildHeaders,
   MppPay,
   type PayResult,
-  buildHeaders,
   readPayResult,
   runMppPayFullFlow,
   runMppPayWithSpendRequest,
 } from './pay';
+import { createMppRequest, probeMppRequest } from './request';
 import { decodeOptions, payOptions } from './schema';
 
 export function createMppCli(
@@ -90,11 +92,10 @@ export function createMppCli(
       const httpMethod = method ?? (data !== undefined ? 'POST' : 'GET');
       const requestHeaders = buildHeaders(data, headers);
 
-      const probeResponse = await fetch(url, {
-        method: httpMethod,
-        body: data,
-        headers: requestHeaders,
-      });
+      const probe = await probeMppRequest(
+        createMppRequest(url, httpMethod, data, requestHeaders),
+      );
+      const probeResponse = probe.response;
 
       if (probeResponse.status !== 402) {
         yield await readPayResult(probeResponse);
@@ -110,6 +111,7 @@ export function createMppCli(
       }
 
       const decoded = decodeStripeChallenge(wwwAuth);
+      await probeResponse.body?.cancel();
       const networkId = decoded.network_id;
       const challengeAmount = decoded.request_json.amount
         ? Number(decoded.request_json.amount)
@@ -159,23 +161,33 @@ export function createMppCli(
         test: opts.test || undefined,
       });
 
-      // Build the mpp pay command for _next with the spend request ID
-      const nextFlags = [`--spend-request-id ${spendRequest.id}`];
-      if (method) nextFlags.push(`-X ${method}`);
-      if (data) nextFlags.push(`-d '${data}'`);
-      if (headers) {
-        for (const h of headers) nextFlags.push(`-H '${h}'`);
+      // Continue from the request that actually returned the challenge. Redirects
+      // may have changed its URL, method, body, or safe-to-forward headers.
+      // Merchant-controlled values stay shell-quoted in the display command.
+      const nextArgs = [
+        'pay',
+        probe.url,
+        '--spend-request-id',
+        spendRequest.id,
+        '-X',
+        probe.method,
+      ];
+      if (probe.body !== undefined) nextArgs.push('-d', probe.body);
+      for (const [name, value] of probe.headers) {
+        nextArgs.push('-H', `${name}: ${value}`);
       }
-      const nextCommand = `mpp pay ${url} ${nextFlags.join(' ')}`;
+      const nextCommand = `mpp ${shellCommand(nextArgs)}`;
+      const pollCommand = `spend-request retrieve ${shellQuote(spendRequest.id)} --interval 2 --max-attempts 300`;
 
       // Yield approval URL and return — agent drives completion via _next
       yield {
         ...spendRequest,
-        instruction: `Present the approval_url to the user and ask them to approve in the Link app. Then call \`spend-request retrieve ${spendRequest.id} --interval 2 --max-attempts 300\` to poll until approved. Once approved, run the _next.command to complete payment. Do not wait for the user to reply — start polling immediately.`,
+        instruction: `Present the approval_url to the user and ask them to approve in the Link app. Then call \`${pollCommand}\` to poll until approved. Once approved, run _next.pay_argv (preferred — invoke it directly without a shell) or _next.pay_command to complete payment. Do not wait for the user to reply — start polling immediately.`,
         _next: {
-          poll_command: `spend-request retrieve ${spendRequest.id} --interval 2 --max-attempts 300`,
+          poll_command: pollCommand,
           pay_command: nextCommand,
-          until: 'status changes from pending_approval, then run pay_command',
+          pay_argv: { command: 'mpp', args: nextArgs },
+          until: 'status changes from pending_approval, then run pay_argv',
         },
       };
     },
