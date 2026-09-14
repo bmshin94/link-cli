@@ -11,4 +11,9 @@ export * from './types/index';
 export * from './resources/interfaces';
 export * from './resources/attestations';
 export * from './resources/credentials';
+export {
+  holderJwkThumbprint,
+  holderJwksEqual,
+  parseHolderPublicJwk,
+} from './resources/holder-jwk';
 export { getDuplicateSpendRequest } from './resources/spend-request';
