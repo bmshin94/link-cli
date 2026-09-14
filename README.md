@@ -283,11 +283,11 @@ Privacy-preserving tokens that show Link attests to your agent:
 
 ```bash
 LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10
-LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10 --issuer https://api.link.com
-LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10 --output-file ./aats.json
+LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10 --export --output-file ./aats.json
+LINK_IDENTITY_COMMANDS=1 link-cli identity attestations take --challenge-file ./challenge.json
 ```
 
-`identity attestations request` asks Link for tokens (`--count` 1–100), returns each complete base64url token with `Authorization: PrivateToken token="<token>"`, and stores unused tokens in `~/.link/aat-pool.json` for `identity request`. You can pass an HTTPS `--issuer` and an `--access-token`; otherwise stored login credentials are used. Issuer discovery and issuance stay on the issuer's HTTPS DNS origin; redirects and IP-literal hosts are rejected. `--output-file` writes the artifact as JSON (0600; use `--force` to overwrite).
+`identity attestations request` asks Link for tokens (`--count` 1–100). By default it fills the CLI pool (`~/.link/aat-pool.json`) and returns counts and metadata, not the raw tokens. `--export` returns newly issued tokens to the caller without adding them to the pool; send them as `Authorization: PrivateToken token="<token>"`. `identity attestations take` atomically removes one matching pooled token. You can pass an HTTPS `--issuer` and an `--access-token`; otherwise stored login credentials are used. Issuer discovery and issuance stay on the issuer's HTTPS DNS origin; redirects and IP-literal hosts are rejected.
 
 User info that has been signed, proving it comes from Link:
 
@@ -295,9 +295,13 @@ User info that has been signed, proving it comes from Link:
 LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get
 LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get --key-file ~/.link/holder-key.jwk --key-type ed25519
 LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get --public-key-file ./holder-public.jwk --output-file ./credential.json
+LINK_IDENTITY_COMMANDS=1 link-cli identity presentations prepare --credential-file ./credential.json --challenge-file ./challenge.json --origin https://merchant.example
+LINK_IDENTITY_COMMANDS=1 link-cli identity presentations create --credential-file ./credential.json --challenge-file ./challenge.json --origin https://merchant.example --key-file ~/.link/holder-key.jwk
 ```
 
 `identity credentials get` fetches that signed user info. With `--key-file` (or the default `~/.link/holder-key.jwk`), the CLI keeps a local private key so it can present the same wallet of claims later. With `--public-key-file`, the CLI sends only that public JWK and never reads or creates a private key — the agent retains the matching private key and signs presentations itself. `--key-file` and `--public-key-file` cannot be combined; `--key-type` applies only when generating a CLI-managed key. `--output-file` writes the credential artifact as JSON (0600; use `--force` to overwrite). Link tells the CLI where to request it; there is no fixed path to hard-code.
+
+`identity presentations prepare` selects disclosures and emits KB-JWT signing input from a saved credential and challenge. It does not load a private key, contact the merchant, or call Link. `identity presentations create` signs that presentation with a matching CLI-managed key file that must already exist.
 
 If a site asks for attestation or who you are, present a pooled attestation token and signed user info on an HTTPS request:
 
@@ -306,7 +310,7 @@ LINK_IDENTITY_COMMANDS=1 link-cli identity request https://merchant.example/chec
 LINK_IDENTITY_COMMANDS=1 link-cli identity request https://merchant.example/checkout --claims email,given_name
 ```
 
-`identity request` sends the HTTP request. When the site challenges with `PrivateToken`, it spends one token from the local pool. When the site asks for signed user info, it gets that from Link, shares only the requested fields, and retries. Both challenges can appear on the same `401`. The retry is signed with a request-specific Web Bot Auth HTTP Message Signature covering the presented token and user info. Redirects are not followed.
+`identity request` sends the HTTP request. When the site challenges with `PrivateToken`, it spends one token from the local pool. When the site asks for signed user info, it gets that from Link, shares only the requested fields, and retries. Both challenges can appear on the same `401`. The retry is an HTTPS request carrying `Authorization: PrivateToken token=...` and `Identity-Presentation: <sd-jwt+kb>` — it does not add Web Bot Auth `Signature` headers. Redirects are not followed.
 
 ### Spend request lifecycle
 

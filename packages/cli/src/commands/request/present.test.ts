@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { loadOrCreateHolderKey } from '../credentials/holder-key';
 import { buildPresentation, parseClaimsChallenge } from './present';
 
 function encoded(value: unknown): string {
@@ -90,7 +91,7 @@ describe('identity presentation', () => {
     });
   });
 
-  it('selects nested claim paths and uses the credential _sd_alg', () => {
+  it('selects nested claim paths and uses the credential _sd_alg', async () => {
     const email = encoded(['salt-email', 'email', 'a@example.com']);
     const street = encoded(['salt-street', 'street', 'Main Street']);
     const address = encoded([
@@ -105,9 +106,14 @@ describe('identity presentation', () => {
       'roles',
       [{ '...': digest(role0) }, { '...': digest(role1) }],
     ]);
+    const directory = mkdtempSync(join(tmpdir(), 'link-cli-request-'));
+    temporaryDirectories.push(directory);
+    const keyFile = join(directory, 'holder.jwk');
+    const holderKey = loadOrCreateHolderKey(keyFile, 'ed25519');
     const jwt = issuerJwt({
       _sd_alg: 'sha-384',
       _sd: [digest(email), digest(address), digest(roles)],
+      cnf: { jwk: holderKey.publicJwk },
     });
     const credential = [
       jwt,
@@ -119,12 +125,10 @@ describe('identity presentation', () => {
       roles,
       '',
     ].join('~');
-    const directory = mkdtempSync(join(tmpdir(), 'link-cli-request-'));
-    temporaryDirectories.push(directory);
 
-    const result = buildPresentation({
+    const result = await buildPresentation({
       credential,
-      keyFile: join(directory, 'holder.jwk'),
+      keyFile,
       keyType: 'ed25519',
       aud: 'https://merchant.example',
       nonce: 'single-use',
@@ -150,11 +154,11 @@ describe('identity presentation', () => {
     );
   });
 
-  it('rejects an unsupported SD-JWT hash algorithm', () => {
+  it('rejects an unsupported SD-JWT hash algorithm', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'link-cli-request-'));
     temporaryDirectories.push(directory);
 
-    expect(() =>
+    await expect(
       buildPresentation({
         credential: `${issuerJwt({ _sd_alg: 'md5', _sd: [] })}~`,
         keyFile: join(directory, 'holder.jwk'),
@@ -163,6 +167,6 @@ describe('identity presentation', () => {
         nonce: 'single-use',
         disclose: ['email'],
       }),
-    ).toThrow('Unsupported SD-JWT hash algorithm');
+    ).rejects.toThrow('Unsupported SD-JWT hash algorithm');
   });
 });

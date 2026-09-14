@@ -1,7 +1,4 @@
-import type {
-  ICredentialsResource,
-  IWebBotAuthResource,
-} from '@stripe/link-sdk';
+import type { ICredentialsResource } from '@stripe/link-sdk';
 import { remainingCount, takeMatchingToken } from '../attestations/pool';
 import type { HolderKeyType } from '../credentials/holder-key';
 import { issueCredential } from '../credentials/issue';
@@ -9,7 +6,6 @@ import {
   buildPresentation,
   buildRequestHeaders,
   claimReferenceKey,
-  contentDigest,
   formatClaimReference,
   parseClaimList,
   parseClaimsChallenge,
@@ -90,7 +86,6 @@ export async function runIdentityRequest(options: {
   keyType: HolderKeyType;
   poolFile: string;
   createCredentialsResource: () => ICredentialsResource;
-  createWebBotAuthResource?: () => IWebBotAuthResource;
   initialResponse?: { response: Response; body: string };
   fetchImpl?: typeof fetch;
   sanitizeDeep: (value: unknown) => unknown;
@@ -109,7 +104,6 @@ export async function runIdentityRequest(options: {
     keyType,
     poolFile,
     createCredentialsResource,
-    createWebBotAuthResource,
     sanitizeDeep,
   } = options;
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -315,8 +309,7 @@ export async function runIdentityRequest(options: {
       const requested = claimOverride ?? claimsChallenge.claims;
       const credential = await issueCredential({
         resource: createCredentialsResource(),
-        keyFile,
-        keyType,
+        source: { kind: 'managed', keyFile, keyType },
       });
       let credentialIssuerUrl: URL;
       try {
@@ -352,7 +345,7 @@ export async function runIdentityRequest(options: {
         }
       }
 
-      const presented = buildPresentation({
+      const presented = await buildPresentation({
         credential: credential.credential,
         keyFile,
         keyType,
@@ -365,7 +358,7 @@ export async function runIdentityRequest(options: {
           ok: false,
           error: {
             code: 'CLAIMS_UNAVAILABLE',
-            message: `The credential from ${credential.issuer} cannot disclose: ${presented.unavailable.map(formatClaimReference).join(', ')}. It holds: ${Object.keys(credential.claims).join(', ')}.`,
+            message: `The credential from ${credential.issuer} cannot disclose: ${presented.unavailable.map(formatClaimReference).join(', ')}. It holds: ${Object.keys(credential.claims ?? {}).join(', ')}.`,
           },
         };
       }
@@ -392,7 +385,7 @@ export async function runIdentityRequest(options: {
         disclosed: presented.disclosed,
         withheld: presented.withheld,
         credential_expires_at: credential.expires_at,
-        holder_key: credential.holder_key.path,
+        holder_key: credential.holder.path ?? '',
       };
     }
 
@@ -422,31 +415,6 @@ export async function runIdentityRequest(options: {
       };
     }
 
-    if (!createWebBotAuthResource) {
-      throw new Error(
-        'A Web Bot Auth resource is required when sending an identity request',
-      );
-    }
-    if (data !== undefined) {
-      setRequestHeader(nextHeaders, 'Content-Digest', contentDigest(data));
-    }
-    const webBotAuth = await createWebBotAuthResource().signRequest({
-      url,
-      method: httpMethod,
-      headers: nextHeaders,
-      ...(data !== undefined ? { body: data } : {}),
-    });
-    setRequestHeader(nextHeaders, 'Signature', webBotAuth.signature);
-    setRequestHeader(
-      nextHeaders,
-      'Signature-Input',
-      webBotAuth.signature_input,
-    );
-    setRequestHeader(
-      nextHeaders,
-      'Signature-Agent',
-      webBotAuth.signature_agent,
-    );
     headers = nextHeaders;
   }
 

@@ -1,10 +1,20 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 export const DEFAULT_AAT_POOL_PATH = join(homedir(), '.link', 'aat-pool.json');
 
 const POOL_FILE_MODE = 0o600;
+const LOCK_TIMEOUT_MS = 5_000;
 
 interface PoolBatch {
   issuer: string;
@@ -43,6 +53,37 @@ function isPoolFile(value: unknown): value is PoolFile {
   });
 }
 
+function wait(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export function withPoolLock<T>(path: string, fn: () => T): T {
+  mkdirSync(dirname(path), { recursive: true });
+  const lockPath = `${path}.lock`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      try {
+        return fn();
+      } finally {
+        closeSync(fd);
+        unlinkSync(lockPath);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting for attestation pool lock at ${lockPath}`,
+        );
+      }
+      wait(20);
+    }
+  }
+}
+
 export function loadPool(path: string): PoolFile {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
@@ -74,9 +115,12 @@ function parsePooledToken(
 
 function savePool(path: string, pool: PoolFile): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(pool, null, 2)}\n`, {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(pool, null, 2)}\n`, {
     mode: POOL_FILE_MODE,
   });
+  chmodSync(tmp, POOL_FILE_MODE);
+  renameSync(tmp, path);
   chmodSync(path, POOL_FILE_MODE);
 }
 
@@ -91,65 +135,79 @@ export function saveIssuedTokens(
   path: string,
   issuance: { issuer: string; token_key_id: string; tokens: string[] },
 ): void {
-  const pool = loadPool(path);
-  const existing = pool.batches.find(
-    (batch) =>
-      batch.issuer === issuance.issuer &&
-      batch.token_key_id === issuance.token_key_id,
-  );
-  if (existing) {
-    existing.tokens.push(...issuance.tokens);
-  } else {
-    pool.batches.push({
-      issuer: issuance.issuer,
-      token_key_id: issuance.token_key_id,
-      tokens: [...issuance.tokens],
-    });
-  }
-  savePool(path, pool);
+  withPoolLock(path, () => {
+    const pool = loadPool(path);
+    const existing = pool.batches.find(
+      (batch) =>
+        batch.issuer === issuance.issuer &&
+        batch.token_key_id === issuance.token_key_id,
+    );
+    if (existing) {
+      existing.tokens.push(...issuance.tokens);
+    } else {
+      pool.batches.push({
+        issuer: issuance.issuer,
+        token_key_id: issuance.token_key_id,
+        tokens: [...issuance.tokens],
+      });
+    }
+    savePool(path, pool);
+  });
 }
 
 export function takeMatchingToken(
   path: string,
   match: { challengeDigest: Uint8Array; tokenKeyId?: Uint8Array },
-): { token: string; issuer: string; remaining: number } | null {
-  const pool = loadPool(path);
-  const expectedDigest = Buffer.from(match.challengeDigest);
-  const expectedKeyId = match.tokenKeyId
-    ? Buffer.from(match.tokenKeyId)
-    : undefined;
+): {
+  token: string;
+  issuer: string;
+  token_key_id: string;
+  remaining: number;
+} | null {
+  return withPoolLock(path, () => {
+    const pool = loadPool(path);
+    const expectedDigest = Buffer.from(match.challengeDigest);
+    const expectedKeyId = match.tokenKeyId
+      ? Buffer.from(match.tokenKeyId)
+      : undefined;
 
-  for (const batch of pool.batches) {
-    if (
-      expectedKeyId &&
-      Buffer.from(batch.token_key_id, 'base64url').compare(expectedKeyId) !== 0
-    ) {
-      continue;
+    for (const batch of pool.batches) {
+      if (
+        expectedKeyId &&
+        Buffer.from(batch.token_key_id, 'base64url').compare(expectedKeyId) !==
+          0
+      ) {
+        continue;
+      }
+      for (let index = 0; index < batch.tokens.length; index++) {
+        const token = batch.tokens[index];
+        if (token === undefined) {
+          continue;
+        }
+        const parsed = parsePooledToken(token);
+        if (!parsed) {
+          continue;
+        }
+        if (parsed.challengeDigest.compare(expectedDigest) !== 0) {
+          continue;
+        }
+        if (expectedKeyId && parsed.tokenKeyId.compare(expectedKeyId) !== 0) {
+          continue;
+        }
+        batch.tokens.splice(index, 1);
+        pool.batches = pool.batches.filter((entry) => entry.tokens.length > 0);
+        savePool(path, pool);
+        return {
+          token,
+          issuer: batch.issuer,
+          token_key_id: batch.token_key_id,
+          remaining: pool.batches.reduce(
+            (total, entry) => total + entry.tokens.length,
+            0,
+          ),
+        };
+      }
     }
-    for (let index = 0; index < batch.tokens.length; index++) {
-      const token = batch.tokens[index];
-      if (token === undefined) {
-        continue;
-      }
-      const parsed = parsePooledToken(token);
-      if (!parsed) {
-        continue;
-      }
-      if (parsed.challengeDigest.compare(expectedDigest) !== 0) {
-        continue;
-      }
-      if (expectedKeyId && parsed.tokenKeyId.compare(expectedKeyId) !== 0) {
-        continue;
-      }
-      batch.tokens.splice(index, 1);
-      pool.batches = pool.batches.filter((entry) => entry.tokens.length > 0);
-      savePool(path, pool);
-      return {
-        token,
-        issuer: batch.issuer,
-        remaining: remainingCount(path),
-      };
-    }
-  }
-  return null;
+    return null;
+  });
 }

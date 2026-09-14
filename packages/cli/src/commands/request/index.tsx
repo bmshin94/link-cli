@@ -1,7 +1,4 @@
-import type {
-  ICredentialsResource,
-  IWebBotAuthResource,
-} from '@stripe/link-sdk';
+import type { ICredentialsResource } from '@stripe/link-sdk';
 import { Cli } from 'incur';
 import type { CliAuthStorage } from '../../auth/storage';
 import { requireAuthGuard } from '../../utils/require-auth';
@@ -10,7 +7,6 @@ import { requestArgs, requestOptions } from './schema';
 
 export function createRequestCli(
   createCredentialsResource: () => ICredentialsResource,
-  createWebBotAuthResource: () => IWebBotAuthResource,
   authStorage?: CliAuthStorage,
   envAccessToken?: string,
 ) {
@@ -20,7 +16,8 @@ export function createRequestCli(
     args: requestArgs,
     options: requestOptions,
     alias: { method: 'X', data: 'd', header: 'H' },
-    mcp: false,
+    // incur types `mcp` on Cli.create as server options; boolean disable is valid at runtime.
+    mcp: false as never,
     // Deliberately not 'agent-only': this is a human-facing command, and that policy
     // suppresses all output on a TTY unless --format is passed explicitly.
     async run(c) {
@@ -42,7 +39,6 @@ export function createRequestCli(
         keyType,
         poolFile,
         createCredentialsResource,
-        createWebBotAuthResource,
         sanitizeDeep,
       });
       if (!result.ok) {

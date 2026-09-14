@@ -100,7 +100,6 @@ if (identityCommandsEnabled) {
         factory.createAttestationsResource(accessToken),
       createCredentialsResource: (accessToken) =>
         factory.createCredentialsResource(accessToken),
-      createWebBotAuthResource: () => factory.createWebBotAuthResource(),
       authStorage,
       envAccessToken,
     }),

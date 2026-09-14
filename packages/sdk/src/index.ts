@@ -21,4 +21,19 @@ export {
   holderJwksEqual,
   parseHolderPublicJwk,
 } from './resources/holder-jwk';
+export {
+  assemblePresentation,
+  claimReferenceKey,
+  prepareKbJwt,
+  selectDisclosures,
+  verifyAssembledPresentation,
+} from './resources/sd-jwt-kb';
+export type {
+  ClaimPathComponent,
+  ClaimReference,
+  DisclosureSelection,
+  HolderSigner,
+  KbJwtAlgorithm,
+  PreparedKbJwt,
+} from './resources/sd-jwt-kb';
 export { getDuplicateSpendRequest } from './resources/spend-request';

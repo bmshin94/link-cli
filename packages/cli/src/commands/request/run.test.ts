@@ -35,7 +35,7 @@ describe('runIdentityRequest PrivateToken retry', () => {
     }
   });
 
-  it('spends a pooled token and Web Bot Auth-signs the retry', async () => {
+  it('spends a pooled token and retries over HTTPS without Web Bot Auth', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'link-cli-request-'));
     directories.push(directory);
     const poolFile = join(directory, 'aat-pool.json');
@@ -67,16 +67,6 @@ describe('runIdentityRequest PrivateToken retry', () => {
         }),
       );
 
-    const signRequest = vi.fn(async () => ({
-      signature: 'agent=:signature:',
-      signature_input:
-        'agent=("@method" "@authority" "@path" "authorization" "signature-agent");created=1;expires=2;keyid="k";tag="web-bot-auth"',
-      signature_agent:
-        'https://api.link.com/.well-known/http-message-signatures-directory',
-      authority: 'localhost:3000',
-      expires_at: '2099-01-01T00:00:00Z',
-    }));
-
     const result = await runIdentityRequest({
       url: 'http://localhost:3000/api/verified/contribute',
       header: [],
@@ -88,7 +78,6 @@ describe('runIdentityRequest PrivateToken retry', () => {
           'should not issue a credential for an AAT-only challenge',
         );
       },
-      createWebBotAuthResource: () => ({ signUrl: vi.fn(), signRequest }),
       fetchImpl: fetchImpl as unknown as typeof fetch,
       sanitizeDeep: (value) => value,
     });
@@ -106,14 +95,14 @@ describe('runIdentityRequest PrivateToken retry', () => {
         response: { ok: true },
       },
     });
-    expect(signRequest).toHaveBeenCalledOnce();
     const retry = fetchImpl.mock.calls[1]?.[1] as RequestInit;
     expect((retry.headers as Record<string, string>).Authorization).toMatch(
       /^PrivateToken token="/,
     );
-    expect((retry.headers as Record<string, string>).Signature).toBe(
-      'agent=:signature:',
-    );
+    expect((retry.headers as Record<string, string>).Signature).toBeUndefined();
+    expect(
+      (retry.headers as Record<string, string>)['Signature-Input'],
+    ).toBeUndefined();
   });
 
   it('prepares an attestation header without sending the retry', async () => {

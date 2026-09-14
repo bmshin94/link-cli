@@ -1,11 +1,7 @@
-import { createHash } from 'node:crypto';
 import type { LinkOptions } from '@/config';
 import { LinkSdkError } from '@/errors';
 import { BaseResource } from '@/resources/base';
-import type {
-  IWebBotAuthResource,
-  WebBotAuthRequest,
-} from '@/resources/interfaces';
+import type { IWebBotAuthResource } from '@/resources/interfaces';
 import type { WebBotAuthBlock } from '@/types/index';
 import { z } from 'zod';
 
@@ -114,75 +110,5 @@ export class WebBotAuthResource
 
     this.cache.set(authority, { block: webBotAuth, expiresAt });
     return webBotAuth;
-  }
-
-  /**
-   * Returns a request-specific Web Bot Auth signature. Unlike `signUrl`, this
-   * method is never cached because the signature binds the method, path,
-   * identity presentation, and body digest of one outbound request.
-   */
-  async signRequest(request: WebBotAuthRequest): Promise<WebBotAuthBlock> {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(request.url);
-    } catch {
-      throw new LinkSdkError(`Invalid URL: ${request.url}`);
-    }
-
-    const normalizedHeaders = Object.fromEntries(
-      Object.entries(request.headers).map(([name, value]) => [
-        name.toLowerCase(),
-        value,
-      ]),
-    );
-    const requiredComponents = [
-      '@method',
-      '@authority',
-      '@path',
-      'signature-agent',
-    ];
-    if (normalizedHeaders.authorization !== undefined) {
-      requiredComponents.push('authorization');
-    }
-    if (normalizedHeaders['identity-presentation'] !== undefined) {
-      requiredComponents.push('identity-presentation');
-    }
-    if (request.body !== undefined) {
-      const expectedDigest = `sha-256=:${createHash('sha256')
-        .update(request.body)
-        .digest('base64')}:`;
-      if (normalizedHeaders['content-digest'] !== expectedDigest) {
-        throw new LinkSdkError(
-          'Content-Digest must be SHA-256 of the exact request body',
-        );
-      }
-      requiredComponents.push('content-digest');
-    }
-
-    const { status, data, rawBody } = await this.apiFetch({
-      method: 'POST',
-      url: this.endpoint,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: request.url,
-        method: request.method.toUpperCase(),
-        headers: normalizedHeaders,
-        ...(request.body !== undefined ? { body: request.body } : {}),
-      }),
-      redirect: 'manual',
-    });
-    const block = this.parseBlock(
-      'get request-specific web bot auth headers',
-      status,
-      data,
-      rawBody,
-      requiredComponents,
-    );
-    if (block.authority !== parsedUrl.host) {
-      throw new LinkSdkError(
-        `Web Bot Auth signature authority ${block.authority} does not match ${parsedUrl.host}`,
-      );
-    }
-    return block;
   }
 }

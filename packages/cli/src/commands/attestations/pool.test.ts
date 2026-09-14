@@ -48,6 +48,7 @@ describe('attestation token pool', () => {
     expect(spent).toEqual({
       token: first,
       issuer: 'https://api.link.com',
+      token_key_id: keyId.toString('base64url'),
       remaining: 1,
     });
     expect(remainingCount(path)).toBe(1);
