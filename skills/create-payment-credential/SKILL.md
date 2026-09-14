@@ -375,10 +375,13 @@ Steps:
    - If checkout `status` is `expired`, stop and report the failure.
    - If the spend request has a terminal failure status (`expired`, `denied`,
      `failed`, or `canceled`), stop and report the failure.
-   - If the spend request `status` is `requires_action`, surface
-     `spend_request.status_details.requires_action.next_action` accurately to
-     the user, including its message and URL, and follow its `resolution`,
-     regardless of the checkout status.
+   - If the spend request `status` is `requires_action`, inspect
+     `spend_request.status_details.requires_action.next_action` regardless of
+     the checkout status. If `next_action` is missing, `null`, or an empty
+     object, treat the composite state as a terminal failure: tell the user
+     there is an error and stop. Otherwise, surface the action
+     accurately to the user, including its message and URL, and follow its
+     `resolution`.
    - Report success only when checkout `status` is `completed` **and** spend
      request `status` is `succeeded`.
    - Otherwise the composite is still pending. Do not call `checkout complete`
@@ -392,10 +395,12 @@ Steps:
    ```
 
 6. **Poll only when the state can progress without replacing the spend request.**
-   For `auto_resume`, show the action and wait for the user to complete it; then
-   call the same retrieve command with `--poll`. Do not start polling before the
-   action is completed, because retrieval will correctly return
-   `action_required` again. For `create_new_spend_request` or
+   A missing, `null`, or empty `next_action` is terminal: report the card error
+   and do not poll or call `checkout complete` again. For `auto_resume`, show
+   the action and wait for the user to complete it; then call the same retrieve
+   command with `--poll`. Do not start polling before the action is completed,
+   because retrieval will correctly return `action_required` again. For
+   `create_new_spend_request` or
    `create_new_spend_request_after_completion`, stop and perform the indicated
    recovery instead of polling.
 
