@@ -88,7 +88,10 @@ export interface SpendRequestStatusDetails {
   };
 }
 
-export type CredentialType = 'shared_payment_token' | 'card';
+export type CredentialType =
+  | 'shared_payment_token'
+  | 'signed_transaction'
+  | 'card';
 
 export interface ApprovalDetail {
   approved_at: number;
@@ -111,6 +114,11 @@ export interface SharedPaymentToken {
   id: string;
   billing_address?: BillingAddress;
   valid_until?: string;
+}
+
+export interface SignedTransaction {
+  /** Serialized signed transaction hex used in an MPP transaction credential. */
+  tx_hash: string;
 }
 
 export interface RefundDetails {
@@ -143,12 +151,14 @@ export interface SpendRequest {
   payment_details?: string;
   credential_type?: CredentialType;
   network_id?: string;
+  payment_challenge?: string;
   card_brand?: string;
   card_last4?: string;
   status: SpendRequestStatus;
   approval_url?: string;
   card?: Card;
   shared_payment_token?: SharedPaymentToken | null;
+  signed_transaction?: SignedTransaction | null;
   link_pay_token?: string;
   payment_status_details?: PaymentStatusDetails | null;
   status_details?: SpendRequestStatusDetails | null;

@@ -32,6 +32,7 @@
     "dev": "tsx src/cli.tsx"
   },
   "dependencies": {
+    "@privy-io/node": "^0.31.0",
     "conf": "^15.1.0",
     "incur": "^0.5.1",
     "ink": "^7.1.1",
