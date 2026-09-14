@@ -255,10 +255,9 @@ export class ResourceFactory {
       return this.credentialsResource;
     }
 
-    this.credentialsResource = sanitizeResource(
-      this.createSdkClient().credentials,
-    );
-    return this.credentialsResource;
+    const resource = sanitizeResource(this.createSdkClient().credentials);
+    this.credentialsResource = resource;
+    return resource;
   }
 
   createSpendRequestResource(): ISpendRequestResource {
