@@ -4,14 +4,15 @@ import type {
 } from '@stripe/link-sdk';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
-import { Credential, Method } from 'mppx';
-import { Mppx, Transport } from 'mppx/client';
+import { Challenge, Credential, Method } from 'mppx';
+import { Mppx } from 'mppx/client';
 import { Methods as StripeMethods } from 'mppx/stripe';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { pollUntilApproved } from '../../utils/poll-until-approved';
 import { sanitizeDeep } from '../../utils/sanitize-text';
 import {
   decodeStripeChallenge,
+  getStripeChargeChallengeFromHeader,
   getStripeChargeChallengeFromResponse,
 } from './decode';
 import {
@@ -90,20 +91,6 @@ function createStripePaymentClient(spt: string) {
   return Mppx.create({
     methods: [stripeCharge, stripeSession],
     polyfill: false,
-    transport: Transport.from<RequestInit, Response>({
-      name: 'stripe-http',
-      isPaymentRequired(response) {
-        return response.status === 402;
-      },
-      getChallenges(response) {
-        return [getStripeChargeChallengeFromResponse(response)];
-      },
-      setCredential(request, credential) {
-        const nextHeaders = new Headers(request.headers);
-        nextHeaders.set('Authorization', credential);
-        return { ...request, headers: nextHeaders };
-      },
-    }),
   });
 }
 
@@ -129,6 +116,7 @@ export async function runMppPayWithSpendRequest(
   data: string | undefined,
   headers: string[] | undefined,
   repository: ISpendRequestResource,
+  approvedChallengeHeader?: string,
 ): Promise<PayResult> {
   const spendRequest = await repository.retrieve(spendRequestId, {
     include: ['shared_payment_token'],
@@ -158,6 +146,7 @@ export async function runMppPayWithSpendRequest(
     method,
     data,
     headers,
+    approvedChallengeHeader,
   );
 }
 
@@ -167,12 +156,17 @@ export async function payWithSpt(
   method: string | undefined,
   data: string | undefined,
   headers: string[] | undefined,
+  approvedChallengeHeader?: string,
 ): Promise<PayResult> {
   const httpMethod = method ?? (data !== undefined ? 'POST' : 'GET');
   const requestHeaders = buildHeaders(data, headers);
+  const approvedChallenge = approvedChallengeHeader
+    ? getStripeChargeChallengeFromHeader(approvedChallengeHeader)
+    : undefined;
   return payPinnedChallengeWithSpt(
     createMppRequest(url, httpMethod, data, requestHeaders),
     spt,
+    approvedChallenge,
   );
 }
 
@@ -187,16 +181,22 @@ async function submitMppPayment(
     statusText: challenge.response.statusText,
     headers: challenge.response.headers,
   });
-  const authHeader =
-    await createStripePaymentClient(spt).createCredential(credentialResponse);
+  const payment =
+    await createStripePaymentClient(spt).preparePayment(credentialResponse);
+  const credential = await payment.createCredential();
   await challenge.response.body?.cancel();
 
-  const paidRequest = {
-    ...challenge,
-    headers: new Headers(challenge.headers),
-  };
-  paidRequest.headers.set('Authorization', authHeader);
-  const response = await fetchMppRequest(paidRequest);
+  const response = await fetch(challenge.url, {
+    ...payment.setCredential(
+      {
+        method: challenge.method,
+        headers: challenge.headers,
+        body: challenge.body,
+      },
+      credential,
+    ),
+    redirect: 'manual',
+  });
   if (isRedirectResponse(response)) {
     await response.body?.cancel();
     throw new Error(
@@ -209,6 +209,7 @@ async function submitMppPayment(
 async function payPinnedChallengeWithSpt(
   request: MppRequest,
   spt: string,
+  approvedChallenge?: Challenge.Challenge,
 ): Promise<PayResult> {
   // Approved credentials may be used minutes later. Refresh the challenge at
   // the pinned destination, but never let that destination move afterward.
@@ -221,7 +222,33 @@ async function payPinnedChallengeWithSpt(
   }
   const refreshed = { ...request, response };
   if (response.status !== 402) return readPayResult(response);
+  if (approvedChallenge) {
+    let refreshedChallenge: Challenge.Challenge;
+    try {
+      refreshedChallenge = getStripeChargeChallengeFromResponse(response);
+    } catch (error) {
+      await response.body?.cancel();
+      throw error;
+    }
+    if (
+      comparableChallenge(refreshedChallenge) !==
+      comparableChallenge(approvedChallenge)
+    ) {
+      await response.body?.cancel();
+      throw new Error(
+        'MPP challenge changed after approval; refusing to use the approved payment credential',
+      );
+    }
+  }
   return submitMppPayment(refreshed, spt);
+}
+
+function comparableChallenge(challenge: Challenge.Challenge): string {
+  return Challenge.serialize({
+    ...challenge,
+    id: 'approval-comparison',
+    expires: undefined,
+  });
 }
 
 export async function runMppPayFullFlow(
@@ -263,6 +290,7 @@ export async function runMppPayFullFlow(
   }
 
   const decoded = decodeStripeChallenge(wwwAuth);
+  const approvedChallenge = getStripeChargeChallengeFromResponse(probeResponse);
   await probeResponse.body?.cancel();
   const networkId = decoded.network_id;
   const challengeAmount = decoded.request_json.amount
@@ -271,6 +299,15 @@ export async function runMppPayFullFlow(
   const challengeCurrency = (decoded.request_json.currency as string) ?? 'usd';
 
   const amount = amountOverride ?? challengeAmount;
+  if (
+    amountOverride !== undefined &&
+    challengeAmount !== undefined &&
+    amountOverride !== challengeAmount
+  ) {
+    throw new Error(
+      `--amount must match the MPP challenge amount (${challengeAmount})`,
+    );
+  }
   if (!amount) {
     throw new Error(
       'Could not determine amount from 402 challenge. Pass --amount explicitly.',
@@ -334,7 +371,11 @@ export async function runMppPayFullFlow(
 
   // 7. Pay
   onStep?.('submitting');
-  return payPinnedChallengeWithSpt(probe, withSpt.shared_payment_token.id);
+  return payPinnedChallengeWithSpt(
+    probe,
+    withSpt.shared_payment_token.id,
+    approvedChallenge,
+  );
 }
 
 export type Step =
