@@ -368,8 +368,7 @@ Steps:
    spend request as the source of truth for payment execution and required
    action. Checkout `completed` is not monotonic during payment: the checkout
    can temporarily be `completed` while the spend request is
-   `requires_action`, and the checkout can then move to `requires_action` until
-   the action resolves.
+   `requires_action`.
 
    Branch in this order:
 
@@ -379,9 +378,7 @@ Steps:
    - If the spend request `status` is `requires_action`, surface
      `spend_request.status_details.requires_action.next_action` accurately to
      the user, including its message and URL, and follow its `resolution`,
-     regardless of the checkout status. The CLI refreshes the spend request
-     when either side of the composite reports `requires_action`; do not run a
-     separate `spend-request retrieve` command.
+     regardless of the checkout status.
    - Report success only when checkout `status` is `completed` **and** spend
      request `status` is `succeeded`.
    - Otherwise the composite is still pending. Do not call `checkout complete`
