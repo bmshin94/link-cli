@@ -240,10 +240,9 @@ export class ResourceFactory {
       return this.attestationsResource;
     }
 
-    this.attestationsResource = sanitizeResource(
-      this.createSdkClient().attestations,
-    );
-    return this.attestationsResource;
+    const resource = sanitizeResource(this.createSdkClient().attestations);
+    this.attestationsResource = resource;
+    return resource;
   }
 
   createCredentialsResource(accessToken?: string): ICredentialsResource {
@@ -256,10 +255,9 @@ export class ResourceFactory {
       return this.credentialsResource;
     }
 
-    this.credentialsResource = sanitizeResource(
-      this.createSdkClient().credentials,
-    );
-    return this.credentialsResource;
+    const resource = sanitizeResource(this.createSdkClient().credentials);
+    this.credentialsResource = resource;
+    return resource;
   }
 
   createSpendRequestResource(): ISpendRequestResource {
