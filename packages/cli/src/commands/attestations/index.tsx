@@ -1,5 +1,6 @@
 import type { IAttestationsResource } from '@stripe/link-sdk';
 import { Cli } from 'incur';
+import { exportAttestationTokens } from './export';
 import { requestOptions } from './schema';
 
 export function createAttestationsCli(
@@ -17,12 +18,21 @@ export function createAttestationsCli(
     mcp: false,
     outputPolicy: 'agent-only' as const,
     async run(c) {
-      const { count, issuer, accessToken } = c.options;
+      const { count, issuer, accessToken, outputFile, force } = c.options;
 
-      return createResource(accessToken).request({
-        issuer,
-        count,
-      });
+      const result = exportAttestationTokens(
+        await createResource(accessToken).request({
+          issuer,
+          count,
+        }),
+      );
+      if (outputFile) {
+        const { writeCredentialFile } = await import(
+          '../../utils/credential-output'
+        );
+        await writeCredentialFile(outputFile, result, force);
+      }
+      return result;
     },
   });
 
