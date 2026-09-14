@@ -1,13 +1,17 @@
 import type { ICredentialsResource } from '@stripe/link-sdk';
 import { Cli } from 'incur';
+import { issueCredential } from './issue';
+import {
+  CredentialKeySourceError,
+  resolveCredentialKeySource,
+} from './key-source';
 import { getOptions } from './schema';
 
 export function createCredentialsCli(
   createResource: (accessToken?: string) => ICredentialsResource,
 ) {
   const cli = Cli.create('credentials', {
-    description:
-      'User info that has been signed, proving it comes from Link.',
+    description: 'User info that has been signed, proving it comes from Link.',
   });
 
   cli.command('get', {
@@ -17,14 +21,41 @@ export function createCredentialsCli(
     mcp: false,
     outputPolicy: 'agent-only' as const,
     async run(c) {
-      const { keyFile, keyType, accessToken } = c.options;
+      const { outputFile, force, accessToken, ...keyOptions } = c.options;
 
-      const { issueCredential } = await import('./issue');
-      return issueCredential({
-        resource: createResource(accessToken),
-        keyFile,
-        keyType,
-      });
+      let source: ReturnType<typeof resolveCredentialKeySource>;
+      try {
+        source = resolveCredentialKeySource(keyOptions);
+      } catch (error) {
+        return c.error({
+          code:
+            error instanceof CredentialKeySourceError
+              ? error.code
+              : 'INVALID_INPUT',
+          message: (error as Error).message,
+        });
+      }
+
+      let result: Awaited<ReturnType<typeof issueCredential>>;
+      try {
+        result = await issueCredential({
+          resource: createResource(accessToken),
+          source,
+        });
+      } catch (error) {
+        return c.error({
+          code: 'INVALID_INPUT',
+          message: (error as Error).message,
+        });
+      }
+
+      if (outputFile) {
+        const { writeCredentialFile } = await import(
+          '../../utils/credential-output'
+        );
+        await writeCredentialFile(outputFile, result, force);
+      }
+      return result;
     },
   });
 

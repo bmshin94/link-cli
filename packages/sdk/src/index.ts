@@ -10,5 +10,10 @@ export {
 export * from './resources/attestations';
 export * from './resources/credentials';
 export * from './resources/interfaces';
+export {
+  holderJwkThumbprint,
+  holderJwksEqual,
+  parseHolderPublicJwk,
+} from './resources/holder-jwk';
 export { getDuplicateSpendRequest } from './resources/spend-request';
 export * from './types/index';

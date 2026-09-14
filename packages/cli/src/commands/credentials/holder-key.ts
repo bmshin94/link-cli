@@ -107,3 +107,34 @@ export function loadOrCreateHolderKey(
     created: true,
   };
 }
+
+/**
+ * Loads an existing holder key. Does not generate a replacement: a missing
+ * file is an error so an existing credential cannot be paired with a new key.
+ */
+export function loadHolderKey(path: string): HolderKey {
+  let stored: StoredHolderKey;
+  try {
+    stored = JSON.parse(readFileSync(path, 'utf8')) as StoredHolderKey;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(
+        `Holder key not found at ${path}. Issue a new credential after creating a key, or use --public-key-file for an agent-managed key.`,
+      );
+    }
+    throw new Error(
+      `Failed to read holder key at ${path}: ${(error as Error).message}`,
+    );
+  }
+
+  const privateKey = createPrivateKey({
+    key: stored.private_jwk as never,
+    format: 'jwk',
+  });
+  return {
+    type: stored.type,
+    privateKey,
+    publicJwk: toPublicJwk(privateKey),
+    created: false,
+  };
+}
