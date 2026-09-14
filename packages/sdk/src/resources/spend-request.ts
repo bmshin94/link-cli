@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { LinkOptions } from '@/config';
 import { LinkApiError } from '@/errors';
 import { BaseResource } from '@/resources/base';
@@ -7,7 +8,6 @@ import type {
   UpdateSpendRequestParams,
 } from '@/resources/interfaces';
 import type { RequestApprovalResponse, SpendRequest } from '@/types/index';
-import { z } from 'zod';
 
 const sharedPaymentTokenSchema = z.union([
   z.string().transform((id) => ({ id })),
@@ -48,6 +48,10 @@ const duplicateSpendRequestErrorSchema = z.looseObject({
 type InternalCreateSpendRequestParams = CreateSpendRequestParams & {
   approve?: boolean;
   expires_at?: number;
+};
+
+type InternalUpdateSpendRequestParams = UpdateSpendRequestParams & {
+  approve?: boolean;
 };
 
 /** Normalizes the legacy string SPT response into the current object shape. */
@@ -116,13 +120,17 @@ export class SpendRequestResource
 
   async update(
     id: string,
-    params: UpdateSpendRequestParams,
+    params: InternalUpdateSpendRequestParams,
   ): Promise<SpendRequest> {
+    const { approve, ...body } = params;
+    const url = approve
+      ? `${this.endpoint}/${id}/update_delegated`
+      : `${this.endpoint}/${id}`;
     const { status, data, rawBody } = await this.apiFetch({
       method: 'POST',
-      url: `${this.endpoint}/${id}`,
+      url,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(body),
     });
 
     if (status < 200 || status >= 300) {

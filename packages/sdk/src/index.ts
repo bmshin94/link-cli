@@ -7,7 +7,6 @@ export {
   LinkSdkError,
   LinkTransportError,
 } from './errors';
-export * from './types/index';
 export * from './resources/interfaces';
 export * from './resources/attestations';
 export * from './resources/credentials';
@@ -17,3 +16,4 @@ export {
   parseHolderPublicJwk,
 } from './resources/holder-jwk';
 export { getDuplicateSpendRequest } from './resources/spend-request';
+export * from './types/index';

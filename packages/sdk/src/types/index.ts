@@ -176,12 +176,42 @@ export interface BankAccountDetails {
   bank_name?: string;
 }
 
+export type AgentWalletVerificationStatus =
+  | 'not_required'
+  | 'ssn_verification'
+  | 'identity_verification'
+  | 'contact_support'
+  | 'complete';
+
+export interface AgentWalletSpendLimits {
+  per_transaction: {
+    limit: number | null;
+  };
+  daily: {
+    limit: number | null;
+    used: number;
+    remaining: number | null;
+  };
+  thirty_day: {
+    limit: number | null;
+    used: number;
+    remaining: number | null;
+  };
+}
+
+export interface AgentWalletVerificationRequirement {
+  status: AgentWalletVerificationStatus;
+  action_url: string | null;
+}
+
 export interface UserInfo {
   email?: string | null;
   name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   phone?: string | null;
+  agent_wallet_spend_limits?: AgentWalletSpendLimits;
+  agent_wallet_verification_requirement?: AgentWalletVerificationRequirement;
 }
 
 export interface ProductCapability {
@@ -193,6 +223,7 @@ export interface PaymentMethod {
   id: string;
   type: string;
   is_default: boolean;
+  name: string;
   nickname?: string;
   card_details?: CardDetails;
   bank_account_details?: BankAccountDetails;

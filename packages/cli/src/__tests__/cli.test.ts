@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { storage } from '../auth/storage';
@@ -73,7 +75,10 @@ let serverPort: number;
 let lastRequest: RequestLog;
 let requests: RequestLog[];
 let nextResponse: { status: number; body: unknown };
-let responsesByUrl: Record<string, { status: number; body: unknown }> = {};
+let responsesByUrl: Record<
+  string,
+  { status: number; body: unknown; headers?: Record<string, string> }
+> = {};
 
 // ─── Second mock server for merchant endpoints ─────────────────────────────
 let merchantServer: http.Server;
@@ -97,12 +102,33 @@ function setNextResponse(status: number, body: unknown) {
   nextResponse = { status, body };
 }
 
-function setResponseForUrl(url: string, status: number, body: unknown) {
-  responsesByUrl[url] = { status, body };
+function setResponseForUrl(
+  url: string,
+  status: number,
+  body: unknown,
+  headers?: Record<string, string>,
+) {
+  responsesByUrl[url] = { status, body, headers };
 }
 
 async function runProdCli(...args: string[]): Promise<CliResult> {
   return runProdCliWithEnv({}, ...args);
+}
+
+async function runShell(command: string): Promise<CliResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync('bash', ['-c', command], {
+      timeout: 10_000,
+    });
+    return { stdout, stderr, exitCode: 0 };
+  } catch (err: unknown) {
+    const e = err as { stdout?: string; stderr?: string; code?: number };
+    return {
+      stdout: e.stdout ?? '',
+      stderr: e.stderr ?? '',
+      exitCode: e.code ?? 1,
+    };
+  }
 }
 
 async function runProdCliWithEnv(
@@ -177,6 +203,7 @@ describe('production mode', () => {
         const response = urlOverride ?? nextResponse;
         res.writeHead(response.status, {
           'Content-Type': 'application/json',
+          ...response.headers,
         });
         res.end(JSON.stringify(response.body));
       });
@@ -223,6 +250,8 @@ describe('production mode', () => {
         'create',
         '--payment-method-id',
         'pd_prod_test',
+        '--idempotency-key',
+        '550e8400-e29b-41d4-a716-446655440000',
         '--merchant-name',
         'Test Merchant',
         '--merchant-url',
@@ -249,6 +278,9 @@ describe('production mode', () => {
 
       const sentBody = JSON.parse(lastRequest.body);
       expect(sentBody.payment_details).toBe('pd_prod_test');
+      expect(sentBody.idempotency_key).toBe(
+        '550e8400-e29b-41d4-a716-446655440000',
+      );
       expect(sentBody.amount).toBe(5000);
       expect(sentBody.merchant_name).toBe('Test Merchant');
       expect(sentBody.line_items).toEqual([
@@ -257,6 +289,55 @@ describe('production mode', () => {
       expect(sentBody.totals).toEqual([
         { type: 'total', display_text: 'Total', amount: 5000 },
       ]);
+      expect(result.stdout + result.stderr).not.toContain(
+        '550e8400-e29b-41d4-a716-446655440000',
+      );
+    });
+
+    it('omits idempotency_key when --idempotency-key is absent', async () => {
+      const result = await runProdCli(
+        'spend-request',
+        'create',
+        '--merchant-name',
+        'Test Merchant',
+        '--merchant-url',
+        'https://example.com',
+        '--context',
+        VALID_CONTEXT,
+        '--amount',
+        '5000',
+        '--no-request-approval',
+        '--json',
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(lastRequest.body).idempotency_key).toBeUndefined();
+    });
+
+    it.each([
+      ['', 'must not be empty'],
+      ['a'.repeat(256), 'at most 255 UTF-8 bytes'],
+      ['é'.repeat(128), 'at most 255 UTF-8 bytes'],
+    ])('rejects invalid idempotency key %#', async (key, expectedMessage) => {
+      const result = await runProdCli(
+        'spend-request',
+        'create',
+        '--idempotency-key',
+        key,
+        '--merchant-name',
+        'Test Merchant',
+        '--merchant-url',
+        'https://example.com',
+        '--context',
+        VALID_CONTEXT,
+        '--amount',
+        '5000',
+        '--json',
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout + result.stderr).toContain(expectedMessage);
+      expect(requests).toHaveLength(0);
     });
 
     it('returns the API response as JSON output', async () => {
@@ -359,6 +440,85 @@ describe('production mode', () => {
       expect(sentBody.merchant_url).toBeUndefined();
     });
 
+    it('creates a delegated Link Pay Token spend request via create_delegated', async () => {
+      setNextResponse(200, {
+        ...BASE_REQUEST,
+        status: 'approved',
+        merchant_name: 'Canonical Merchant',
+        merchant_url: 'https://canonical.example',
+        execution_method: 'link_pay_token',
+        merchant_account_id: 'acct_lpt_target',
+      });
+
+      const result = await runProdCli(
+        'spend-request',
+        'create',
+        '--payment-method-id',
+        'pd_prod_test',
+        '--idempotency-key',
+        'delegated-key',
+        '--execution-method',
+        'link_pay_token',
+        '--merchant-account-id',
+        'acct_lpt_target',
+        '--context',
+        VALID_CONTEXT,
+        '--amount',
+        '3500',
+        '--approve',
+        '--no-request-approval',
+        '--json',
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(requests).toHaveLength(1);
+      expect(lastRequest.url).toBe('/spend_requests/create_delegated');
+
+      const sentBody = JSON.parse(lastRequest.body);
+      expect(sentBody).toMatchObject({
+        idempotency_key: 'delegated-key',
+        payment_details: 'pd_prod_test',
+        credential_type: 'card',
+        execution_method: 'link_pay_token',
+        merchant_account_id: 'acct_lpt_target',
+      });
+      expect(sentBody.approve).toBeUndefined();
+      expect(sentBody.request_approval).toBeUndefined();
+      expect(sentBody.merchant_name).toBeUndefined();
+      expect(sentBody.merchant_url).toBeUndefined();
+
+      const output = parseJson(result.stdout) as Record<string, unknown>[];
+      const request = output[0];
+      expect(request.status).toBe('approved');
+      expect(request._next).toBeUndefined();
+      expect(request.instruction).toBeUndefined();
+    });
+
+    it('rejects delegated Link Pay Token approval without --no-request-approval', async () => {
+      const result = await runProdCli(
+        'spend-request',
+        'create',
+        '--payment-method-id',
+        'pd_prod_test',
+        '--execution-method',
+        'link_pay_token',
+        '--merchant-account-id',
+        'acct_lpt_target',
+        '--context',
+        VALID_CONTEXT,
+        '--amount',
+        '3500',
+        '--approve',
+        '--json',
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout + result.stderr).toContain(
+        '--approve with --execution-method link_pay_token requires --no-request-approval',
+      );
+      expect(requests).toHaveLength(0);
+    });
+
     const invalidLptCreateCases = [
       {
         name: 'merchant-account-id without execution-method',
@@ -419,18 +579,6 @@ describe('production mode', () => {
           '--test',
         ],
         message: 'test cannot be used when execution-method is link_pay_token',
-      },
-      {
-        name: 'delegated approval',
-        args: [
-          '--execution-method',
-          'link_pay_token',
-          '--merchant-account-id',
-          'acct_lpt_target',
-          '--approve',
-        ],
-        message:
-          'approve cannot be used when execution-method is link_pay_token; use request-approval instead',
       },
       {
         name: 'agent-provided merchant identity',
@@ -738,10 +886,13 @@ describe('production mode', () => {
 
     it('surfaces API error messages', async () => {
       setNextResponse(422, { error: { message: 'Invalid payment details' } });
+      const idempotencyKey = 'error-path-key-that-must-not-be-echoed';
 
       const result = await runProdCli(
         'spend-request',
         'create',
+        '--idempotency-key',
+        idempotencyKey,
         '--payment-method-id',
         'pd_bad',
         '-m',
@@ -762,6 +913,7 @@ describe('production mode', () => {
       expect(result.exitCode).toBe(1);
       const output = result.stdout + result.stderr;
       expect(output).toContain('Invalid payment details');
+      expect(output).not.toContain(idempotencyKey);
     });
 
     it('surfaces the duplicate spend request on spend_request_rate_limited error', async () => {
@@ -828,6 +980,31 @@ describe('production mode', () => {
       const sentBody = JSON.parse(lastRequest.body);
       expect(sentBody.payment_details).toBe('pd_updated');
       expect(sentBody.merchant_url).toBe('https://updated.com');
+    });
+
+    it('uses the delegated update endpoint when --approve is set', async () => {
+      setNextResponse(200, {
+        ...BASE_REQUEST,
+        amount: 6000,
+        approval_url: 'https://app.link.com/approve/lsrq_prod_001',
+      });
+
+      const result = await runProdCli(
+        'spend-request',
+        'update',
+        'lsrq_prod_001',
+        '--amount',
+        '6000',
+        '--approve',
+        '--json',
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(lastRequest.method).toBe('POST');
+      expect(lastRequest.url).toBe(
+        '/spend_requests/lsrq_prod_001/update_delegated',
+      );
+      expect(JSON.parse(lastRequest.body)).toEqual({ amount: 6000 });
     });
 
     it('surfaces API errors for update', async () => {
@@ -2307,6 +2484,12 @@ describe('production mode', () => {
       setResponseForUrl('/userinfo', 200, {
         email: 'user@example.com',
         name: 'Test User',
+        agent_wallet_spend_limits: {
+          per_transaction: { limit: null },
+          daily: { limit: 500000, used: 120000, remaining: 380000 },
+          thirty_day: { limit: null, used: 600000, remaining: null },
+        },
+        agent_wallet_step_up: { status: 'not_required', action_url: null },
       });
 
       const result = await runProdCliWithEnv(
@@ -2319,6 +2502,15 @@ describe('production mode', () => {
       expect(result.exitCode).toBe(0);
       const output = parseJson(result.stdout) as Record<string, unknown>;
       expect(output.email).toBe('user@example.com');
+      expect(output.agent_wallet_spend_limits).toEqual({
+        per_transaction: { limit: null },
+        daily: { limit: 500000, used: 120000, remaining: 380000 },
+        thirty_day: { limit: null, used: 600000, remaining: null },
+      });
+      expect(output.agent_wallet_verification_requirement).toEqual({
+        status: 'not_required',
+        action_url: null,
+      });
       const userInfoRequest = requests.find((r) => r.url === '/userinfo');
       expect(userInfoRequest).toBeDefined();
       expect(userInfoRequest?.headers.authorization).toBe(
@@ -2480,6 +2672,8 @@ describe('production mode', () => {
       expect(parsed.status).toBe(200);
       expect(parsed.body).toContain('success');
       expect(merchantRequests).toHaveLength(2);
+      expect(merchantRequests[0].headers['user-agent']).toMatch(/^link-cli\//);
+      expect(merchantRequests[1].headers['user-agent']).toMatch(/^link-cli\//);
       expect(merchantRequests[1].headers.authorization).toMatch(/^Payment /);
     });
 
@@ -2662,6 +2856,25 @@ describe('production mode', () => {
 
       expect(merchantRequests[0].headers['x-custom-header']).toBe('hello');
       expect(merchantRequests[0].headers['x-another']).toBe('world');
+      expect(merchantRequests[0].headers['user-agent']).toMatch(/^link-cli\//);
+    });
+
+    it('lets --header override the default User-Agent', async () => {
+      setNextResponse(200, APPROVED_SPT_REQUEST);
+      setMerchantResponse(200, '{"ok":true}');
+
+      await runProdCli(
+        'mpp',
+        'pay',
+        `http://127.0.0.1:${merchantPort}/api/endpoint`,
+        '--spend-request-id',
+        'lsrq_spt_001',
+        '--header',
+        'User-Agent: CustomBot/1.0',
+        '--json',
+      );
+
+      expect(merchantRequests[0].headers['user-agent']).toBe('CustomBot/1.0');
     });
 
     it('auto-applies Content-Type application/json when --data is provided', async () => {
@@ -2704,6 +2917,158 @@ describe('production mode', () => {
       expect(merchantRequests[0].headers['content-type']).toContain(
         'text/plain',
       );
+    });
+
+    describe('_next continuation quoting', () => {
+      const PENDING_SPT_REQUEST = {
+        ...BASE_REQUEST,
+        id: 'lsrq_spt_002',
+        status: 'pending_approval',
+        credential_type: 'shared_payment_token',
+        network_id: 'net_001',
+        approval_url: 'https://link.com/approve/lsrq_spt_002',
+      };
+
+      function payloadUrl(marker: string): string {
+        return `http://127.0.0.1:${merchantPort}/api/charge$(touch${'${IFS}'}${marker})`;
+      }
+
+      async function runFullFlow(url: string) {
+        setNextResponse(200, PENDING_SPT_REQUEST);
+        setMerchantResponse(402, '{"error":"payment required"}', {
+          'www-authenticate': WWW_AUTHENTICATE_STRIPE,
+        });
+
+        const result = await runProdCli(
+          'mpp',
+          'pay',
+          url,
+          '--context',
+          VALID_CONTEXT,
+          '--payment-method-id',
+          'pd_prod_test',
+          '--format',
+          'json',
+        );
+
+        expect(result.exitCode).toBe(0);
+        const output = parseJson(result.stdout) as Array<{
+          _next: {
+            pay_command: string;
+            pay_argv: { command: string; args: string[] };
+          };
+        }>;
+        return output[0]._next;
+      }
+
+      it('carries the raw URL in pay_argv and a quoted URL in pay_command', async () => {
+        const marker = `${os.tmpdir()}/link-cli-injection-argv-${process.pid}`;
+        const url = payloadUrl(marker);
+        const effectiveUrl = new URL(url).href;
+
+        const next = await runFullFlow(url);
+
+        expect(next.pay_argv.command).toBe('mpp');
+        expect(next.pay_argv.args[0]).toBe('pay');
+        expect(next.pay_argv.args[1]).toBe(effectiveUrl);
+        expect(next.pay_argv.args).toContain('--spend-request-id');
+        expect(next.pay_argv.args).toContain('lsrq_spt_002');
+
+        expect(next.pay_command).not.toContain('pay $(touch');
+        expect(next.pay_command).toContain(`'${effectiveUrl}'`);
+      });
+
+      it('continues from the effective redirected request', async () => {
+        setNextResponse(200, PENDING_SPT_REQUEST);
+        setResponseForUrl('/merchant-redirect', 302, null, {
+          Location: `http://127.0.0.1:${merchantPort}/api/charge`,
+        });
+        setMerchantResponse(402, '{"error":"payment required"}', {
+          'www-authenticate': WWW_AUTHENTICATE_STRIPE,
+        });
+
+        const result = await runProdCli(
+          'mpp',
+          'pay',
+          `http://127.0.0.1:${serverPort}/merchant-redirect`,
+          '--context',
+          VALID_CONTEXT,
+          '--payment-method-id',
+          'pd_prod_test',
+          '--data',
+          '{"item":"book"}',
+          '--header',
+          'Authorization: Bearer caller-value',
+          '--format',
+          'json',
+        );
+
+        expect(result.exitCode).toBe(0);
+        const output = parseJson(result.stdout) as Array<{
+          _next: { pay_argv: { command: string; args: string[] } };
+        }>;
+        const args = output[0]._next.pay_argv.args;
+        expect(args[1]).toBe(`http://127.0.0.1:${merchantPort}/api/charge`);
+        expect(args.slice(args.indexOf('-X'), args.indexOf('-X') + 2)).toEqual([
+          '-X',
+          'GET',
+        ]);
+        expect(args).not.toContain('-d');
+        expect(args.join(' ')).not.toMatch(/authorization|content-type/i);
+      });
+
+      it('does not execute the payload when pay_command is run through bash', async () => {
+        const marker = `${os.tmpdir()}/link-cli-injection-bash-${process.pid}`;
+        if (fs.existsSync(marker)) fs.unlinkSync(marker);
+
+        const next = await runFullFlow(payloadUrl(marker));
+
+        // `mpp` is not on PATH, so this fails — but an unquoted $(...) would
+        // still have been expanded by the shell before that failure.
+        await runShell(next.pay_command);
+
+        expect(fs.existsSync(marker)).toBe(false);
+      });
+
+      it('quotes payloads passed via --data and --header', async () => {
+        setNextResponse(200, PENDING_SPT_REQUEST);
+        setMerchantResponse(402, '{"error":"payment required"}', {
+          'www-authenticate': WWW_AUTHENTICATE_STRIPE,
+        });
+
+        const marker = `${os.tmpdir()}/link-cli-injection-flags-${process.pid}`;
+        if (fs.existsSync(marker)) fs.unlinkSync(marker);
+        const dataPayload = `{"a":"'; touch ${marker}; echo '"}`;
+
+        const result = await runProdCli(
+          'mpp',
+          'pay',
+          `http://127.0.0.1:${merchantPort}/api/charge`,
+          '--context',
+          VALID_CONTEXT,
+          '--payment-method-id',
+          'pd_prod_test',
+          '--data',
+          dataPayload,
+          '--header',
+          `X-Evil: $(touch${'${IFS}'}${marker})`,
+          '--format',
+          'json',
+        );
+
+        expect(result.exitCode).toBe(0);
+        const output = parseJson(result.stdout) as Array<{
+          _next: {
+            pay_command: string;
+            pay_argv: { command: string; args: string[] };
+          };
+        }>;
+        const next = output[0]._next;
+
+        expect(next.pay_argv.args).toContain(dataPayload);
+        await runShell(next.pay_command);
+        expect(fs.existsSync(marker)).toBe(false);
+      });
     });
   });
 

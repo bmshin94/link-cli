@@ -1,13 +1,13 @@
+import { z } from 'zod';
 import type { LinkOptions } from '@/config';
 import { BaseResource } from '@/resources/base';
 import type { IShippingAddressResource } from '@/resources/interfaces';
 import type { ShippingAddressRecord } from '@/types/index';
-import { z } from 'zod';
 
 const shippingAddressSchema = z.looseObject({
   id: z.string(),
   is_default: z.boolean(),
-  nickname: z.string().nullable(),
+  nickname: z.optional(z.string().nullable()),
   address: z.looseObject({}).nullable(),
 });
 const shippingAddressesResponseSchema = z.looseObject({

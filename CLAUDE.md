@@ -7,6 +7,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 Link CLI — lets agents get secure, one-time-use payment credentials from a Link wallet. pnpm + Turborepo monorepo:
 
 - **`@stripe/link-sdk`** (`packages/sdk`): Typed Link API client and resource implementations. It accepts `accessToken` or `getAccessToken`; it does not own OAuth state. Entry: `src/index.ts`.
+- **Link Go SDK** (`packages/sdk-go`): Go equivalent of `@stripe/link-sdk`. It accepts `AccessToken` or `GetAccessToken`; it does not own OAuth state. Package name: `link`.
 - **`@stripe/link-cli`** (`packages/cli`): Commander.js + Ink/React CLI that consumes `@stripe/link-sdk`. Entry: `src/cli.tsx`.
 
 ## Commands
@@ -16,6 +17,7 @@ pnpm install                    # install dependencies
 pnpm run build                  # build all packages (turbo)
 pnpm run dev                    # watch mode
 pnpm run test                   # run all tests
+pnpm run test:go                # run the Go SDK tests
 pnpm run typecheck              # type-check all packages
 pnpm biome check .              # lint + format check (CI)
 pnpm run check                  # lint + format with auto-fix
@@ -46,13 +48,17 @@ The SDK only accepts credentials. Device authorization, refresh-token
 persistence, login state, and auth-specific errors live under
 `packages/cli/src/auth/`.
 
+The Go SDK currently mirrors the Link API resources exposed by the TypeScript
+SDK. Until a server-owned OpenAPI schema is available, keep API changes aligned
+through implementation review and each package's unit tests.
+
 ### CLI Command Structure
 
 Commands in `packages/cli/src/cli.tsx` (incur framework). Each has two output modes:
 - **Interactive** (default): Ink/React components from `packages/cli/src/commands/`
 - **JSON** (`--format json`): JSON to stdout, errors as JSON with `code` and `message` fields with exit code 1
 
-Commands: `auth login|logout|status`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `identity attestations request`, `identity credentials get`, `serve`.
+Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `identity attestations request`, `identity credentials get`, `report`, `serve`.
 
 The CLI also runs as an MCP server (`--mcp`) and serves skill files via `skills` subcommand, both provided by incur.
 
@@ -94,12 +100,20 @@ Key input field notes:
 - `--output-file <path>` on `retrieve` or `create` writes full card credentials to a local file (0600 permissions) and redacts card data in stdout. `--force` allows overwriting an existing file.
 - `create` also accepts an undocumented `--expires-at <unix_seconds>` to override the default 12-hour spend request expiration (3 hours to 7 days in the future). It's deliberately excluded from `--schema`/`--llms-full` output and from README/SKILL.md: it's gated to an allow-list of OAuth clients server-side, and most callers get a 400 (`"expires_at is not supported for this client"`) if they try it — don't document or suggest it to general agents.
 
+### user-info retrieve
+
+- `user-info retrieve` returns the existing identity fields and can include `agent_wallet_spend_limits` and `agent_wallet_verification_requirement` enrichment.
+- Spend limits contain per-transaction, daily, and 30-day values. Finite values are cents because `/userinfo` does not return currency. A `null` limit or remaining amount explicitly means unlimited; `used` remains numeric.
+- Either enrichment object can be omitted independently when enrichment is disabled or unavailable. Do not interpret omission as unlimited or as a default verification status.
+- Verification status is one of `not_required`, `ssn_verification`, `identity_verification`, `contact_support`, or `complete`. `action_url` is nullable and directs the user to the required action when present. This is informational and does not change spend-request or `requires_action` handling.
+
 ### mpp pay
 
 - `mpp pay <url> --context <ctx> [-X <method>] [-d <body>] [-H <header>]... [--amount <cents>] [--payment-method-id <id>] [--test]` — handles the full MPP flow end-to-end: probes the URL for a 402 challenge, parses the `www-authenticate` header to extract network_id and amount, creates a spend request (credential_type: shared_payment_token), gets user approval, retrieves the SPT, and pays. Amount/currency are derived from the 402 challenge; `--amount` overrides. `--context` is required (min 100 chars) — describe the purchase and rationale. Default payment method is used unless `--payment-method-id` is specified.
 - `mpp pay <url> --spend-request-id <id> [--method <method>] [--data <body>] [--header <header>]...` — backward-compat mode: uses a pre-approved spend request directly, skipping creation/approval.
 - `--header` is repeatable and uses `"Name: Value"` format. `Content-Type: application/json` is auto-applied when `--data` is provided; user-provided headers take precedence.
 - The SPT is one-time-use — a failed payment requires running `mpp pay` again (creates a new spend request).
+- In agent mode the full flow yields `_next.pay_argv` (`{ command: 'mpp', args: [...] }`) alongside `_next.pay_command`. **`pay_argv` is authoritative** — it holds the raw values and is meant to be invoked without a shell. `pay_command` is the compatibility string and every dynamic part of it (url, method, body, each header, spend-request id) must go through `shellQuote` from `packages/cli/src/utils/shell-quote.ts`. See "Security: shell-quoting command strings".
 - Implemented in `packages/cli/src/commands/mpp/` — pay.tsx (logic), schema.ts (input/output schema), index.tsx (incur registration).
 
 ### demo command
@@ -137,6 +151,12 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 - `--output-file` writes the versioned credential artifact as JSON (0600; `--force` to overwrite). The issued `cnf.jwk` is checked against the requested public key before returning.
 - Requires `userinfo:read` and `payment_methods.agentic`; no additional OAuth scope is required.
 
+### report command
+
+- `report --domain <d> --outcome <success|blocked|abandoned> --spend-request-id <lsrq_...> [--tag <t>]... [--step <s>] [--freeform-context <s>] [--attempt-trace <s>]` — records the outcome of a purchase attempt. Options in `packages/cli/src/commands/report/schema.ts`, SDK params in `CreateReportParams`. API endpoint: `/agent_observations`. Output policy is `agent-only`.
+- `--step` is where the agent was when the outcome occurred (max 500). `--attempt-trace` is the whole path it took, one numbered line per step, intended to be replayable by another agent. Both are optional and independent.
+- `--attempt-trace` intentionally carries **no** zod `.max()`. The API truncates at `REPORT_ATTEMPT_TRACE_MAX_LENGTH` (8000, exported from the SDK) and still records the report, so client-side rejection would trade a long narrative for a lost outcome. `--step` and `--freeform-context` keep their `.max(500)` because the API rejects those outright.
+
 ### serve command
 
 - `serve [--port <n>] [--host <host>]` — HTTP server that exposes the CLI's MCP endpoint. Implemented in `packages/cli/src/commands/serve/index.ts`. The handler forwards to `rootCli.fetch()` (incur), but is a **privilege boundary**: `requireAuth` only proves the CLI *owner* is authenticated, not that the HTTP caller is authorized.
@@ -167,6 +187,18 @@ Server-returned strings can contain ANSI escape sequences or control characters 
 - **Attacker-controlled data that does NOT flow through an SDK resource** — must be sanitized at its own parse boundary. `mpp pay` sanitizes the HTTP response in `readPayResult()` (`pay.tsx`); `mpp decode` sanitizes the parsed `WWW-Authenticate` challenge in `decodeStripeChallenge()` (`decode.ts`). These bypass the resource factory, so the return value of the parse/fetch helper is the chokepoint — sanitizing there covers both the interactive Ink render and the agent (toon/yaml/md) output at once.
 
 JSON output mode (`--format json`) is **not** affected — `JSON.stringify` encodes escape sequences as Unicode literals.
+
+## Security: Shell-Quoting Command Strings
+
+Any string the CLI emits for an agent to *run* (`instruction`, `_next.command`, `_next.pay_command`) is a shell-injection sink. Agents commonly execute these through Bash, so interpolating an unquoted value there gives whoever controls that value command execution on the agent's host — even though the value was safe as an argv entry. Sanitization does not help: `$(...)`, backticks and `;` are ordinary printable characters.
+
+Rules:
+
+- Every dynamic value interpolated into a command string goes through `shellQuote()` from `packages/cli/src/utils/shell-quote.ts`, or the whole argv list through `shellCommand()`. This applies to server-issued IDs too — uniform treatment removes the "is this field trusted?" judgment call from future edits.
+- Prefer emitting a **structured** continuation next to the string (`_next.pay_argv` = `{ command, args }`) and point agents at it. A list of arguments has no seam to smuggle syntax through; a string always does.
+- Naive `'${value}'` wrapping is **not** quoting — a single `'` in the value closes it and escapes.
+- Regression coverage lives in `packages/cli/src/utils/__tests__/shell-quote.test.ts` (bash round-trip) and the `_next continuation quoting` block in `packages/cli/src/__tests__/cli.test.ts`.
+
 ## Environment Variables
 
 | Variable | Effect |

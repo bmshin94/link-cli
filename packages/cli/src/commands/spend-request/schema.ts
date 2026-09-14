@@ -1,6 +1,16 @@
 import { z } from 'incur';
 
 export const createOptions = z.object({
+  idempotencyKey: z
+    .string()
+    .min(1, 'Idempotency key must not be empty')
+    .refine((key) => new TextEncoder().encode(key).length <= 255, {
+      message: 'Idempotency key must be at most 255 UTF-8 bytes',
+    })
+    .optional()
+    .describe(
+      'Opaque, non-sensitive value to reuse only when retrying the same logical creation',
+    ),
   paymentMethodId: z.string().optional().describe('Payment method ID'),
   credentialType: z
     .enum(['shared_payment_token', 'card'])
@@ -26,12 +36,7 @@ export const createOptions = z.object({
     .describe(
       'Stripe account ID from data-stripe-merchant-account; required with execution_method link_pay_token',
     ),
-  amount: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(500000)
-    .describe('Amount in cents'),
+  amount: z.coerce.number().int().positive().describe('Amount in cents'),
   currency: z.string().length(3).default('usd').describe('Currency code'),
   merchantName: z
     .string()
@@ -166,4 +171,8 @@ export const updateOptions = z.object({
     .describe(
       'Total (repeatable, key:value format). Keys: type (required; one of: subtotal, tax, total, items_base_amount, items_discount, discount, fulfillment, shipping, fee, gift_wrap, tip, store_credit), display_text (required), amount (required). Example: "type:total,display_text:Total,amount:5000"',
     ),
+  approve: z
+    .boolean()
+    .default(false)
+    .describe('Use the delegated approval flow for this update'),
 });
