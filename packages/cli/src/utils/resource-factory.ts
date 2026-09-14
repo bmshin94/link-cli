@@ -240,10 +240,9 @@ export class ResourceFactory {
       return this.attestationsResource;
     }
 
-    this.attestationsResource = sanitizeResource(
-      this.createSdkClient().attestations,
-    );
-    return this.attestationsResource;
+    const resource = sanitizeResource(this.createSdkClient().attestations);
+    this.attestationsResource = resource;
+    return resource;
   }
 
   createCredentialsResource(accessToken?: string): ICredentialsResource {
