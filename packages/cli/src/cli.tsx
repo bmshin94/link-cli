@@ -156,12 +156,7 @@ cli.command(
   ),
 );
 cli.command(
-  createUcpCli(
-    () => factory.createUcpResource(),
-    () => factory.createSpendRequestResource(),
-    authStorage,
-    envAccessToken,
-  ),
+  createUcpCli(() => factory.createUcpResource(), authStorage, envAccessToken),
 );
 cli.command(
   createDemoCli(

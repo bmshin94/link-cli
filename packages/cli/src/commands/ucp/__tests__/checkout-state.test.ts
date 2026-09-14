@@ -1,5 +1,4 @@
 import type {
-  ISpendRequestResource,
   IUcpResource,
   NextActionResolution,
   SpendRequest,
@@ -33,12 +32,6 @@ function resource(
     completeCheckout: vi.fn(),
     retrieveCheckout,
   };
-}
-
-function spendResource(
-  retrieve: ISpendRequestResource['retrieve'] = vi.fn(async () => null),
-): Pick<ISpendRequestResource, 'retrieve'> {
-  return { retrieve };
 }
 
 function composite(
@@ -135,6 +128,18 @@ describe('classifyUcpCheckout', () => {
     });
   });
 
+  it('handles a requires action spend request without a next action', () => {
+    const value = composite('requires_action', 'requires_action');
+    value.spend_request.status_details = undefined;
+
+    expect(classifyUcpCheckout(value)).toMatchObject({
+      outcome: 'action_required',
+      resolution: 'unknown',
+      spend_request: { id: 'lsrq_1', status: 'requires_action' },
+    });
+    expect(classifyUcpCheckout(value)).not.toHaveProperty('next_action');
+  });
+
   it.each(['open', 'completed'] as const)(
     'uses spend-request status as the source of truth for step-up when checkout is %s',
     (checkoutStatus) => {
@@ -193,7 +198,7 @@ describe('pollUcpCheckout', () => {
     );
 
     const results = await collect(
-      pollUcpCheckout(repository, spendResource(), 'dcs_1', {
+      pollUcpCheckout(repository, 'dcs_1', {
         spendRequestId: 'lsrq_1',
         interval: 0.001,
         timeout: 60,
@@ -222,7 +227,7 @@ describe('pollUcpCheckout', () => {
     );
 
     const results = await collect(
-      pollUcpCheckout(repository, spendResource(), 'dcs_1', {
+      pollUcpCheckout(repository, 'dcs_1', {
         spendRequestId: 'lsrq_1',
         interval: 0.001,
         timeout: 60,
@@ -243,11 +248,8 @@ describe('pollUcpCheckout', () => {
       'auto_resume',
     );
     const autoRepository = resource(vi.fn(async () => autoState));
-    const autoSpendRequests = spendResource(
-      vi.fn(async () => autoState.spend_request),
-    );
     const autoResults = await collect(
-      pollUcpCheckout(autoRepository, autoSpendRequests, 'dcs_1', {
+      pollUcpCheckout(autoRepository, 'dcs_1', {
         spendRequestId: 'lsrq_1',
         interval: 0.001,
         timeout: 60,
@@ -263,11 +265,8 @@ describe('pollUcpCheckout', () => {
       'create_new_spend_request',
     );
     const actionRepository = resource(vi.fn(async () => actionState));
-    const actionSpendRequests = spendResource(
-      vi.fn(async () => actionState.spend_request),
-    );
     const actionResults = await collect(
-      pollUcpCheckout(actionRepository, actionSpendRequests, 'dcs_1', {
+      pollUcpCheckout(actionRepository, 'dcs_1', {
         spendRequestId: 'lsrq_1',
         interval: 0.001,
         timeout: 60,
@@ -286,7 +285,7 @@ describe('pollUcpCheckout', () => {
 
     await expect(
       collect(
-        pollUcpCheckout(repository, spendResource(), 'dcs_1', {
+        pollUcpCheckout(repository, 'dcs_1', {
           spendRequestId: 'lsrq_1',
           interval: 0.001,
           timeout: 60,
@@ -301,7 +300,7 @@ describe('pollUcpCheckout', () => {
       vi.fn(async () => composite('open', 'approved')),
     );
     const results = await collect(
-      pollUcpCheckout(repository, spendResource(), 'dcs_1', {
+      pollUcpCheckout(repository, 'dcs_1', {
         spendRequestId: 'lsrq_1',
         interval: 0.001,
         timeout: 0.003,
@@ -318,91 +317,55 @@ describe('pollUcpCheckout', () => {
 });
 
 describe('consolidated checkout retrieve mode', () => {
-  it('retrieves the authoritative spend request action when its embedded status requires action', async () => {
-    const value = composite('completed', 'requires_action', 'auto_resume');
-    const authoritativeSpendRequest = composite(
+  it('returns the nested requires action spend request from checkout retrieval', async () => {
+    const value = composite(
       'requires_action',
       'requires_action',
       'auto_resume',
-    ).spend_request;
-    const repository = resource(vi.fn(async () => value));
-    const spendRequests = spendResource(
-      vi.fn(async () => authoritativeSpendRequest),
     );
+    const repository = resource(vi.fn(async () => value));
 
-    const result = runUcpCheckoutRetrieve(repository, spendRequests, 'dcs_1', {
+    const result = runUcpCheckoutRetrieve(repository, 'dcs_1', {
       spendRequestId: 'lsrq_1',
+      test: true,
       poll: false,
     });
 
     expect(Symbol.asyncIterator in result).toBe(false);
-    await expect(result).resolves.toMatchObject({
-      spend_request: {
-        status_details: {
-          requires_action: {
-            next_action: {
-              resolution: 'auto_resume',
-              action_url: 'https://example.com/action',
-            },
-          },
-        },
-      },
+    await expect(result).resolves.toBe(value);
+    expect(repository.retrieveCheckout).toHaveBeenCalledWith('dcs_1', {
+      spend_request_id: 'lsrq_1',
+      test: true,
     });
-    expect(repository.retrieveCheckout).toHaveBeenCalledOnce();
-    expect(spendRequests.retrieve).toHaveBeenCalledWith('lsrq_1');
+    expect(
+      value.spend_request.status_details?.requires_action?.next_action,
+    ).toMatchObject({
+      resolution: 'auto_resume',
+      action_url: 'https://example.com/action',
+    });
+    expect(value).not.toHaveProperty('next_action');
   });
 
-  it('retrieves the authoritative spend request when checkout reaches requires action first', async () => {
-    const value = composite('requires_action', 'approved');
-    const authoritativeSpendRequest = composite(
-      'requires_action',
-      'requires_action',
-      'auto_resume',
-    ).spend_request;
+  it('preserves the nested spend request when checkout needs no action', async () => {
+    const value = composite('completed', 'succeeded');
     const repository = resource(vi.fn(async () => value));
-    const spendRequests = spendResource(
-      vi.fn(async () => authoritativeSpendRequest),
-    );
-
-    const result = runUcpCheckoutRetrieve(repository, spendRequests, 'dcs_1', {
+    const result = runUcpCheckoutRetrieve(repository, 'dcs_1', {
       spendRequestId: 'lsrq_1',
       poll: false,
     });
 
-    await expect(result).resolves.toMatchObject({
-      spend_request: { status: 'requires_action' },
+    await expect(result).resolves.toBe(value);
+    expect(value.spend_request).toMatchObject({
+      id: 'lsrq_1',
+      status: 'succeeded',
     });
-    expect(spendRequests.retrieve).toHaveBeenCalledWith('lsrq_1');
   });
 
-  it('fails clearly when a required step-up spend request is missing', async () => {
-    const repository = resource(
-      vi.fn(async () =>
-        composite('completed', 'requires_action', 'auto_resume'),
-      ),
-    );
-
-    const result = runUcpCheckoutRetrieve(
-      repository,
-      spendResource(),
-      'dcs_1',
-      {
-        spendRequestId: 'lsrq_missing',
-        poll: false,
-      },
-    );
-
-    await expect(result).rejects.toThrow(
-      'Spend request lsrq_missing was not found',
-    );
-  });
-
-  it('does not retrieve the spend request when checkout needs no action', async () => {
+  it('returns a polling stream with --poll', async () => {
     const repository = resource(
       vi.fn(async () => composite('completed', 'succeeded')),
     );
-    const spendRequests = spendResource();
-    const result = runUcpCheckoutRetrieve(repository, spendRequests, 'dcs_1', {
+    const result = runUcpCheckoutRetrieve(repository, 'dcs_1', {
       spendRequestId: 'lsrq_1',
       poll: true,
       timeout: 60,
@@ -412,7 +375,6 @@ describe('consolidated checkout retrieve mode', () => {
     await expect(
       collect(result as AsyncGenerator<UcpCheckoutWaitResult>),
     ).resolves.toMatchObject([{ outcome: 'success' }]);
-    expect(spendRequests.retrieve).not.toHaveBeenCalled();
   });
 
   it('defaults polling to 600 seconds and rejects timeout without poll', () => {

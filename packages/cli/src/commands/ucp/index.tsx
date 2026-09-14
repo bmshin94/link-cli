@@ -1,6 +1,5 @@
 import type {
   CreateUcpCheckoutParams,
-  ISpendRequestResource,
   IUcpResource,
   SearchUcpCatalogParams,
   UcpCheckout,
@@ -42,7 +41,6 @@ function parseUcpLineItem(item: unknown): UcpLineItem {
 
 export function createUcpCli(
   repositoryFactory: () => IUcpResource,
-  spendRequestRepositoryFactory: () => ISpendRequestResource,
   authStorage?: CliAuthStorage,
   envAccessToken?: string,
 ) {
@@ -253,8 +251,7 @@ export function createUcpCli(
     middleware: [requireAuth(authStorage, envAccessToken)],
     run(c) {
       const repository = repositoryFactory();
-      const spendRequests = spendRequestRepositoryFactory();
-      return runUcpCheckoutRetrieve(repository, spendRequests, c.args.id, {
+      return runUcpCheckoutRetrieve(repository, c.args.id, {
         spendRequestId: c.options.spendRequestId,
         test: c.options.test || undefined,
         poll: c.options.poll,

@@ -1,5 +1,4 @@
 import type {
-  ISpendRequestResource,
   IUcpResource,
   NextAction,
   SpendRequest,
@@ -7,8 +6,6 @@ import type {
   UcpCheckoutWithSpendRequest,
 } from '@stripe/link-sdk';
 import { pollUntil } from '../../utils/poll-until';
-
-type SpendRequestRetriever = Pick<ISpendRequestResource, 'retrieve'>;
 
 export type UcpCheckoutWaitReason =
   | 'checkout_completed_and_spend_request_succeeded'
@@ -119,45 +116,29 @@ export interface RunUcpCheckoutRetrieveOptions
   timeout?: number;
 }
 
-async function retrieveUcpCheckoutState(
+function retrieveUcpCheckoutState(
   repository: IUcpResource,
-  spendRequests: SpendRequestRetriever,
   id: string,
   options: Pick<PollUcpCheckoutOptions, 'spendRequestId' | 'test'>,
 ): Promise<UcpCheckoutWithSpendRequest> {
-  const checkout = await repository.retrieveCheckout(id, {
+  return repository.retrieveCheckout(id, {
     spend_request_id: options.spendRequestId,
     test: options.test,
   });
-
-  if (
-    checkout.status !== 'requires_action' &&
-    checkout.spend_request.status !== 'requires_action'
-  ) {
-    return checkout;
-  }
-
-  const spendRequest = await spendRequests.retrieve(options.spendRequestId);
-  if (!spendRequest) {
-    throw new Error(`Spend request ${options.spendRequestId} was not found`);
-  }
-
-  return { ...checkout, spend_request: spendRequest };
 }
 
 export function runUcpCheckoutRetrieve(
   repository: IUcpResource,
-  spendRequests: SpendRequestRetriever,
   id: string,
   options: RunUcpCheckoutRetrieveOptions,
 ):
   | Promise<UcpCheckoutWithSpendRequest>
   | AsyncGenerator<UcpCheckoutWaitResult> {
   if (!options.poll) {
-    return retrieveUcpCheckoutState(repository, spendRequests, id, options);
+    return retrieveUcpCheckoutState(repository, id, options);
   }
 
-  return pollUcpCheckout(repository, spendRequests, id, {
+  return pollUcpCheckout(repository, id, {
     spendRequestId: options.spendRequestId,
     test: options.test,
     timeout: options.timeout ?? DEFAULT_UCP_POLL_TIMEOUT_SECONDS,
@@ -166,12 +147,11 @@ export function runUcpCheckoutRetrieve(
 
 export async function* pollUcpCheckout(
   repository: IUcpResource,
-  spendRequests: SpendRequestRetriever,
   id: string,
   options: PollUcpCheckoutOptions,
 ): AsyncGenerator<UcpCheckoutWaitResult> {
   for await (const result of pollUntil({
-    fn: () => retrieveUcpCheckoutState(repository, spendRequests, id, options),
+    fn: () => retrieveUcpCheckoutState(repository, id, options),
     isTerminal: (composite) =>
       classifyUcpCheckout(composite).outcome !== 'pending',
     interval: options.interval ?? UCP_POLL_INTERVAL_SECONDS,

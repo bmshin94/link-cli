@@ -3366,29 +3366,23 @@ describe('production mode', () => {
     });
 
     describe('checkout retrieve', () => {
-      it('retrieves the spend request when checkout requires action', async () => {
+      it('GETs the composite state once and preserves nested next_action output', async () => {
         setNextResponse(200, {
           id: 'dcs_1',
           status: 'requires_action',
           spend_request: {
             id: 'lsrq_1',
-            status: 'approved',
+            status: 'requires_action',
             created_at: '2026-03-10T00:00:00Z',
             updated_at: '2026-03-10T00:00:01Z',
-          },
-        });
-        setResponseForUrl('/spend_requests/lsrq_1', 200, {
-          id: 'lsrq_1',
-          status: 'requires_action',
-          created_at: '2026-03-10T00:00:00Z',
-          updated_at: '2026-03-10T00:00:01Z',
-          status_details: {
-            requires_action: {
-              next_action: {
-                type: 'three_d_secure',
-                resolution: 'auto_resume',
-                display_message: 'Complete verification',
-                action_url: 'https://example.com/action',
+            status_details: {
+              requires_action: {
+                next_action: {
+                  type: 'three_d_secure',
+                  resolution: 'auto_resume',
+                  display_message: 'Complete verification',
+                  action_url: 'https://example.com/action',
+                },
               },
             },
           },
@@ -3406,7 +3400,7 @@ describe('production mode', () => {
         );
 
         expect(result.exitCode).toBe(0);
-        expect(requests).toHaveLength(2);
+        expect(requests).toHaveLength(1);
         const checkoutRequest = requests[0];
         expect(checkoutRequest?.method).toBe('GET');
         expect(checkoutRequest?.body).toBe('');
@@ -3417,11 +3411,9 @@ describe('production mode', () => {
         expect(requestUrl.pathname).toBe('/ucp/checkout/dcs_1');
         expect(requestUrl.searchParams.get('spend_request_id')).toBe('lsrq_1');
         expect(requestUrl.searchParams.get('test')).toBe('true');
-        expect(requests[1]).toMatchObject({
-          method: 'GET',
-          url: '/spend_requests/lsrq_1',
-          body: '',
-        });
+        expect(
+          requests.some((request) => request.url.startsWith('/spend_requests')),
+        ).toBe(false);
 
         const output = parseJson(result.stdout) as Record<string, unknown>;
         expect(output).toMatchObject({
