@@ -3318,6 +3318,43 @@ describe('production mode', () => {
         expect(combined).toContain('Your card was declined.');
       });
 
+      it('returns actionable guidance for a card missing billing details', async () => {
+        setNextResponse(400, {
+          error: {
+            code: 'parameter_missing',
+            message:
+              'Missing required param: payment_method[billing_details][address][line1].',
+            param: 'payment_method[billing_details][address][line1]',
+          },
+        });
+
+        const result = await runProdCli(
+          'ucp',
+          'checkout',
+          'complete',
+          'dcs_1',
+          '--spend-request-id',
+          'lsrq_1',
+          '--business',
+          'np_1',
+          '--json',
+        );
+
+        expect(result.exitCode).toBe(1);
+        const output = parseJson(result.stdout) as {
+          code: string;
+          message: string;
+          cta: { commands: Array<{ command: string }> };
+        };
+        expect(output.code).toBe('api_error');
+        expect(output.message).toContain('street address (line 1)');
+        expect(output.message).toContain('https://app.link.com/wallet');
+        expect(output.message).toContain('create a new spend request');
+        expect(output.cta.commands[0]?.command).toBe(
+          'link-cli payment-methods add',
+        );
+      });
+
       it('requires a spend request ID', async () => {
         const result = await runProdCli(
           'ucp',

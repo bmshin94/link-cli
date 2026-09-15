@@ -9,6 +9,7 @@ import Spinner from 'ink-spinner';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DISPLAY_DELAY_MS } from '../../utils/constants';
+import { formatUcpCheckoutError } from './checkout-error';
 import {
   DEFAULT_UCP_POLL_TIMEOUT_SECONDS,
   UCP_POLL_INTERVAL_SECONDS,
@@ -115,7 +116,7 @@ export const CheckoutComplete: React.FC<CheckoutCompleteProps> = ({
         }
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : JSON.stringify(err));
+        setError(formatUcpCheckoutError(err).message);
         setPhase('error');
         finish(null);
       }

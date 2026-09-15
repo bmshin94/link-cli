@@ -1,10 +1,11 @@
-import type {
-  CreateUcpCheckoutParams,
-  IUcpResource,
-  SearchUcpCatalogParams,
-  UcpCheckout,
-  UcpLineItem,
-  UcpSearchResult,
+import {
+  type CreateUcpCheckoutParams,
+  type IUcpResource,
+  LinkApiError,
+  type SearchUcpCatalogParams,
+  type UcpCheckout,
+  type UcpLineItem,
+  type UcpSearchResult,
 } from '@stripe/link-sdk';
 import { Cli, z } from 'incur';
 import React from 'react';
@@ -15,6 +16,7 @@ import { requireAuth } from '../../utils/require-auth';
 import { CatalogSearch } from './catalog-search';
 import { CheckoutComplete } from './checkout-complete';
 import { CheckoutCreate } from './checkout-create';
+import { formatUcpCheckoutError } from './checkout-error';
 import { runUcpCheckoutRetrieve } from './checkout-state';
 import {
   catalogSearchOptions,
@@ -236,7 +238,28 @@ export function createUcpCli(
         );
       }
 
-      return repository.completeCheckout(id, params);
+      try {
+        return await repository.completeCheckout(id, params);
+      } catch (err) {
+        const formatted = formatUcpCheckoutError(err);
+        if (err instanceof LinkApiError && formatted.missingBillingDetails) {
+          return c.error({
+            code: err.code,
+            message: formatted.message,
+            cta: {
+              description:
+                'Open Link Wallet to update or replace the incomplete card.',
+              commands: [
+                {
+                  command: 'payment-methods add',
+                  description: 'Open Link Wallet to manage payment methods',
+                },
+              ],
+            },
+          });
+        }
+        throw err;
+      }
     },
   });
 

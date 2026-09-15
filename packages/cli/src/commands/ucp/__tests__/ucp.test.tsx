@@ -1,7 +1,8 @@
-import type {
-  IUcpResource,
-  UcpCheckout,
-  UcpSearchResult,
+import {
+  type IUcpResource,
+  LinkApiError,
+  type UcpCheckout,
+  type UcpSearchResult,
 } from '@stripe/link-sdk';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
@@ -224,6 +225,42 @@ describe('ucp checkout create component', () => {
 });
 
 describe('ucp checkout complete component', () => {
+  it('shows actionable guidance when the selected card lacks billing details', async () => {
+    const repo = makeResource({
+      completeCheckout: vi.fn(async () => {
+        throw new LinkApiError(
+          'Failed to complete UCP checkout (400): Missing required param: payment_method[billing_details][address][line1].',
+          {
+            status: 400,
+            details: {
+              error: {
+                code: 'parameter_missing',
+                param: 'payment_method[billing_details][address][line1]',
+              },
+            },
+          },
+        );
+      }),
+    });
+
+    const { lastFrame } = render(
+      <CheckoutComplete
+        repository={repo}
+        id="dcs_1"
+        params={{ spend_request_id: 'lsrq_1', profile_id: 'np_1' }}
+        onComplete={() => {}}
+      />,
+    );
+
+    await vi.waitFor(() => {
+      const frame = lastFrame();
+      expect(frame).toContain('street address (line 1)');
+      expect(frame).toContain('https://app.link.com/wallet');
+      expect(frame).toContain('create a new spend request');
+      expect(frame).not.toContain('payment_method[billing_details]');
+    });
+  });
+
   it('submits once, verifies the composite state, and renders success', async () => {
     const checkout: UcpCheckout = {
       id: 'dcs_1',
