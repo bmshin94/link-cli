@@ -3284,6 +3284,7 @@ describe('production mode', () => {
         );
 
         expect(result.exitCode).toBe(0);
+        expect(requests).toHaveLength(1);
         expect(lastRequest.method).toBe('POST');
         expect(lastRequest.url).toBe('/ucp/checkout/dcs_1/complete');
         expect(JSON.parse(lastRequest.body)).toEqual({

@@ -276,6 +276,35 @@ describe('pollUcpCheckout', () => {
     expect(actionResults[0]).toMatchObject({ outcome: 'action_required' });
   });
 
+  it('can keep polling through auto-resume actions for the interactive flow', async () => {
+    const states = [
+      composite('requires_action', 'requires_action', 'auto_resume'),
+      composite('completed', 'succeeded'),
+    ];
+    const repository = resource(
+      vi.fn(async () => {
+        const state = states.shift();
+        if (!state) throw new Error('No checkout state remaining');
+        return state;
+      }),
+    );
+
+    const results = await collect(
+      pollUcpCheckout(repository, 'dcs_1', {
+        spendRequestId: 'lsrq_1',
+        interval: 0.001,
+        timeout: 60,
+        continueAutoResume: true,
+      }),
+    );
+
+    expect(results.map(({ outcome }) => outcome)).toEqual([
+      'action_required',
+      'success',
+    ]);
+    expect(repository.completeCheckout).not.toHaveBeenCalled();
+  });
+
   it('propagates retrieval errors immediately', async () => {
     const repository = resource(
       vi.fn(async () => {

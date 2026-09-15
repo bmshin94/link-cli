@@ -108,6 +108,8 @@ export interface PollUcpCheckoutOptions {
   /** Internal test override; the CLI always uses UCP_POLL_INTERVAL_SECONDS. */
   interval?: number;
   timeout: number;
+  /** Keep polling while an action can resume the same spend request. */
+  continueAutoResume?: boolean;
 }
 
 export interface RunUcpCheckoutRetrieveOptions
@@ -152,8 +154,15 @@ export async function* pollUcpCheckout(
 ): AsyncGenerator<UcpCheckoutWaitResult> {
   for await (const result of pollUntil({
     fn: () => retrieveUcpCheckoutState(repository, id, options),
-    isTerminal: (composite) =>
-      classifyUcpCheckout(composite).outcome !== 'pending',
+    isTerminal: (composite) => {
+      const classified = classifyUcpCheckout(composite);
+      if (classified.outcome === 'pending') return false;
+      return !(
+        options.continueAutoResume &&
+        classified.outcome === 'action_required' &&
+        classified.resolution === 'auto_resume'
+      );
+    },
     interval: options.interval ?? UCP_POLL_INTERVAL_SECONDS,
     timeout: options.timeout,
     maxAttempts: 0,
