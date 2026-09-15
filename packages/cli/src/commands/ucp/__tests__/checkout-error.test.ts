@@ -15,15 +15,23 @@ function apiError(
 }
 
 describe('formatUcpCheckoutError', () => {
-  it('formats a structured missing billing address parameter', () => {
+  it.each([
+    ['[name]', 'billing name'],
+    ['[address]', 'billing address'],
+    ['[address][line1]', 'street address (line 1)'],
+    ['[address][city]', 'billing address city'],
+    ['[address][state]', 'billing address state'],
+    ['[address][country]', 'billing address country'],
+    ['[address][postal_code]', 'billing address postal code'],
+  ])('formats a missing billing detail for %s', (suffix, label) => {
     const result = formatUcpCheckoutError(
       apiError('Missing required param', {
-        param: 'payment_method[billing_details][address][line1]',
+        param: `payment_method[billing_details]${suffix}`,
       }),
     );
 
     expect(result.missingBillingDetails).toBe(true);
-    expect(result.message).toContain('street address (line 1)');
+    expect(result.message).toContain(label);
     expect(result.message).toContain('https://app.link.com/wallet');
     expect(result.message).toContain('create a new spend request');
   });

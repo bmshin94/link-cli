@@ -7,6 +7,7 @@ const BILLING_FIELD_LABELS: Record<string, string> = {
   '[name]': 'billing name',
   '[email]': 'billing email',
   '[phone]': 'billing phone number',
+  '[address]': 'billing address',
   '[address][line1]': 'street address (line 1)',
   '[address][line2]': 'street address (line 2)',
   '[address][city]': 'billing address city',
