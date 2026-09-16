@@ -357,17 +357,22 @@ card SpendRequest instead; do not create an LPT request.
 
 ### Inspect a merchant site
 
-Before creating a spend request, use `inspect` to check which agent payment strategies a merchant supports:
+Before creating a spend request, use `inspect` to discover how agents can engage the site. It returns a **Directory** object (the same shape a future Directory API is expected to return), built locally from site probes:
 
 ```bash
 link-cli inspect https://shop.example.com/checkout
 ```
 
-It probes, in order of recommendation: a [UCP](https://ucp.dev) merchant profile at `/.well-known/ucp`, an [MPP](https://mpp.dev) OpenAPI spec at `/api/openapi.json` or `/openapi.json`, an x402 manifest at `/.well-known/x402.json` (informational only), and the given page's HTML for a Link Pay Token AI-agent steering block (`.AiAgentPaymentSteering` / `input[name="link_pay_token"]`). It returns a sorted list of detected strategies and a top recommendation — falling back to `card` when nothing else is detected.
+Required fields: `id`, `url`. Optional fields are omitted when unknown (`display_name`, `profile_id`, `username`, `description`, `llms_txt`, and each `available_tools` section). `id` is a locally synthesized `directory_...` placeholder until a backend exists.
 
-For MPP, it doesn't just check that an OpenAPI spec exists — per the [MPP discovery spec](https://mpp.dev/advanced/discovery), it inspects each operation's `x-payment-info.offers[]` and only recommends `shared_payment_token` when an operation actually offers the `"stripe"` method (most MPP integrations only offer crypto rails like `tempo`). When a spec doesn't break offers out by method, it falls back to a live probe of the endpoint and reads the real `WWW-Authenticate` challenge. The recommendation includes the exact `operation` (path, method, description, request body schema) an agent needs to call it.
+It probes `llms.txt`, a [UCP](https://ucp.dev) profile at `/.well-known/ucp`, an [MPP](https://mpp.dev) OpenAPI spec at `/api/openapi.json` or `/openapi.json`, MCP well-known manifests, provisioning command mentions, and the page HTML for a Link Pay Token steering block. Matching capabilities are returned under `available_tools`:
 
-For UCP, it parses the full `.well-known/ucp` profile rather than just checking it responds — `merchant`, `description`, `services` (transport/endpoint per service), `capabilities`, and `payment_handlers` all come back in `probes.ucp` and, when recommended, in `recommendation.profile`.
+- `machine_payments[]` — `mppx '<endpoint>'` plus description and URL
+- `mcp[]` — MCP server command, description, and URL
+- `provisioning[]` — `stripe provision '<slug>'`
+- `browser_checkout` — `merchant_advice` / `general_advice` for paying in a browser with a Link card
+
+For MPP, it inspects each operation's `x-payment-info.offers[]` per the [MPP discovery spec](https://mpp.dev/advanced/discovery). When a spec doesn't break offers out by method, it falls back to a live probe of the endpoint and reads the real `WWW-Authenticate` challenge.
 
 ### MPP
 

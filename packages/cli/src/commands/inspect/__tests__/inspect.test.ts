@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { localDirectoryId } from '../directory';
 import { runInspect } from '../inspect';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -15,8 +16,21 @@ function htmlResponse(body: string, status = 200): Response {
   });
 }
 
+function textResponse(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
+}
+
 function notFound(): Response {
   return new Response('not found', { status: 404 });
+}
+
+function expectNoNulls(value: unknown) {
+  const serialized = JSON.stringify(value);
+  expect(serialized).not.toContain('null');
+  expect(serialized).not.toMatch(/:\[\]/);
 }
 
 function ucpProfile(): Record<string, unknown> {
@@ -66,6 +80,7 @@ function mppSpec(methods: string[]): Record<string, unknown> {
       '/api/thing': {
         get: {
           operationId: 'getThing',
+          summary: 'Fetch a thing',
           'x-payment-info': {
             offers: methods.map((method) => ({
               method,
@@ -81,9 +96,6 @@ function mppSpec(methods: string[]): Record<string, unknown> {
   };
 }
 
-// Mirrors climate.stripe.dev's shape: a `protocols`-only x-payment-info block
-// with no per-method `offers` breakdown, so stripe support can only be
-// confirmed by a live 402 probe of the operation.
 function protocolsOnlySpec(): Record<string, unknown> {
   return {
     openapi: '3.1.0',
@@ -136,7 +148,23 @@ function stripeChallengeHeader(networkId: string): string {
 }
 
 describe('runInspect', () => {
-  it('recommends ucp when a UCP profile is present', async () => {
+  it('returns a Directory object with locally synthesized id and required url', async () => {
+    const fetchImpl = vi.fn(async () => notFound());
+
+    const result = await runInspect('https://shop.example.com/checkout', {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.id).toBe(localDirectoryId('https://shop.example.com'));
+    expect(result.url).toBe('https://shop.example.com');
+    expect(result).not.toHaveProperty('profile_id');
+    expect(result).not.toHaveProperty('username');
+    expect(result).not.toHaveProperty('display_name');
+    expect(result).not.toHaveProperty('available_tools');
+    expectNoNulls(result);
+  });
+
+  it('maps a UCP profile onto display fields and MCP tools', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url.endsWith('/.well-known/ucp')) {
@@ -152,85 +180,26 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.hostname).toBe('shop.example.com');
-    expect(result.recommendation.strategy).toBe('ucp');
-    expect(result.recommendation.credential_type).toBeNull();
-    expect(result.strategies.find((s) => s.name === 'ucp')?.detected).toBe(
-      true,
+    expect(result.display_name).toBe('Prompt Shop');
+    expect(result.description).toBe('Drop-in system prompts for AI agents.');
+    expect(result.available_tools?.mcp).toEqual([
+      {
+        command: "'https://shop.example.com/api/ucp/mcp'",
+        description: 'Use MCP for dev.ucp.shopping',
+        url: 'https://shop.example.com/api/ucp/mcp',
+      },
+    ]);
+    expect(result.available_tools?.browser_checkout?.merchant_advice).toMatch(
+      /UCP profile/,
     );
-    expect(result.strategies[0].name).toBe('ucp');
-    expect(result._next).toEqual({
-      command: 'ucp discover --business https://shop.example.com',
-      description: 'Confirm UCP capabilities for this merchant',
-    });
+    expect(result.available_tools?.browser_checkout?.general_advice).toMatch(
+      /card credential type/,
+    );
+    expect(result.available_tools).not.toHaveProperty('machine_payments');
+    expectNoNulls(result);
   });
 
-  it('surfaces the UCP profile (merchant, services, capabilities, payment handlers) in the recommendation', async () => {
-    const fetchImpl = vi.fn(async (input: string | URL) => {
-      const url = input.toString();
-      if (url.endsWith('/.well-known/ucp')) {
-        return jsonResponse(ucpProfile());
-      }
-      if (url === 'https://shop.example.com/checkout') {
-        return htmlResponse('<html><body>Pay here</body></html>');
-      }
-      return notFound();
-    });
-
-    const result = await runInspect('https://shop.example.com/checkout', {
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-
-    expect(result.probes.ucp.merchant).toBe('Prompt Shop');
-    expect(result.probes.ucp.services).toEqual([
-      {
-        service: 'dev.ucp.shopping',
-        version: '2026-04-08',
-        transport: 'mcp',
-        endpoint: 'https://shop.example.com/api/ucp/mcp',
-      },
-      {
-        service: 'dev.ucp.shopping',
-        version: '2026-04-08',
-        transport: 'rest',
-        endpoint: 'https://shop.example.com/api/ucp',
-      },
-    ]);
-    expect(result.probes.ucp.capabilities).toEqual([
-      {
-        capability: 'dev.ucp.shopping.catalog.search',
-        version: '2026-04-08',
-        endpoint: 'https://shop.example.com/api/ucp/catalog',
-      },
-      {
-        capability: 'dev.ucp.shopping.checkout',
-        version: '2026-04-08',
-        endpoint: undefined,
-      },
-    ]);
-    expect(result.probes.ucp.payment_handlers).toEqual([
-      {
-        handler: 'com.stripe.payments',
-        id: 'stripe_payments',
-        version: '2026-06-25',
-      },
-    ]);
-
-    const ucpStrategy = result.strategies.find((s) => s.name === 'ucp');
-    expect(ucpStrategy?.evidence[0]).toMatch(/"Prompt Shop"/);
-    expect(ucpStrategy?.evidence[0]).toMatch(/2 services, 2 capabilities/);
-
-    expect(result.recommendation.profile).toEqual({
-      profile_url: 'https://shop.example.com/.well-known/ucp',
-      merchant: 'Prompt Shop',
-      description: 'Drop-in system prompts for AI agents.',
-      services: result.probes.ucp.services,
-      capabilities: result.probes.ucp.capabilities,
-      payment_handlers: result.probes.ucp.payment_handlers,
-    });
-  });
-
-  it('recommends shared_payment_token when the MPP spec offers the "stripe" method', async () => {
+  it('maps stripe MPP operations onto machine_payments tools', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url.endsWith('/api/openapi.json')) {
@@ -246,15 +215,14 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.recommendation.strategy).toBe('shared_payment_token');
-    expect(result.recommendation.credential_type).toBe('shared_payment_token');
-    expect(result._next).toBeUndefined();
-    const mppOpenapi = result.probes.mpp_openapi;
-    expect(mppOpenapi[0].url).toBe('https://shop.example.com/api/openapi.json');
-    expect(mppOpenapi[0].found).toBe(true);
-    expect(mppOpenapi[0].offers_stripe).toBe(true);
-    expect(mppOpenapi[0].offered_methods).toEqual(['tempo', 'stripe']);
-    expect(mppOpenapi).toHaveLength(1);
+    expect(result.display_name).toBe('Test API');
+    expect(result.available_tools?.machine_payments).toEqual([
+      {
+        command: "mppx 'https://shop.example.com/api/thing'",
+        description: 'Fetch a thing (tempo, stripe)',
+        url: 'https://shop.example.com/api/thing',
+      },
+    ]);
   });
 
   it('falls back to /openapi.json when /api/openapi.json is missing', async () => {
@@ -266,9 +234,6 @@ describe('runInspect', () => {
       if (url.endsWith('/openapi.json')) {
         return jsonResponse(mppSpec(['stripe']));
       }
-      if (url === 'https://shop.example.com/checkout') {
-        return htmlResponse('<html><body>Pay here</body></html>');
-      }
       return notFound();
     });
 
@@ -276,22 +241,17 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    const mppOpenapi = result.probes.mpp_openapi;
-    expect(mppOpenapi).toHaveLength(2);
-    expect(mppOpenapi[1].url).toBe('https://shop.example.com/openapi.json');
-    expect(mppOpenapi[1].found).toBe(true);
-    expect(result.recommendation.strategy).toBe('shared_payment_token');
+    expect(result.available_tools?.machine_payments?.[0].url).toBe(
+      'https://shop.example.com/api/thing',
+    );
   });
 
-  it('does not recommend shared_payment_token when the MPP spec only offers crypto rails', async () => {
+  it('still lists crypto-only MPP operations as machine_payments tools', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url.endsWith('/api/openapi.json')) {
         return jsonResponse(mppSpec(['tempo', 'evm', 'solana']));
       }
-      if (url === 'https://shop.example.com/checkout') {
-        return htmlResponse('<html><body>Pay here</body></html>');
-      }
       return notFound();
     });
 
@@ -299,46 +259,12 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    const mppOpenapi = result.probes.mpp_openapi;
-    expect(mppOpenapi[0].found).toBe(true);
-    expect(mppOpenapi[0].offers_stripe).toBe(false);
-    expect(mppOpenapi[0].offered_methods).toEqual(['tempo', 'evm', 'solana']);
-
-    const sptStrategy = result.strategies.find(
-      (s) => s.name === 'shared_payment_token',
+    expect(result.available_tools?.machine_payments?.[0].description).toMatch(
+      /tempo, evm, solana/,
     );
-    expect(sptStrategy?.detected).toBe(false);
-    expect(sptStrategy?.evidence[0]).toMatch(
-      /does not explicitly declare the "stripe" payment method/,
-    );
-    expect(result.recommendation.strategy).toBe('card');
   });
 
-  it('includes the operation to call when shared_payment_token is recommended', async () => {
-    const fetchImpl = vi.fn(async (input: string | URL) => {
-      const url = input.toString();
-      if (url.endsWith('/api/openapi.json')) {
-        return jsonResponse(mppSpec(['tempo', 'stripe']));
-      }
-      if (url === 'https://shop.example.com/checkout') {
-        return htmlResponse('<html><body>Pay here</body></html>');
-      }
-      return notFound();
-    });
-
-    const result = await runInspect('https://shop.example.com/checkout', {
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-
-    expect(result.recommendation.operation).toEqual({
-      path: '/api/thing',
-      method: 'GET',
-      description: undefined,
-      request_body_schema: undefined,
-    });
-  });
-
-  it('falls back to a live 402 probe when the spec only declares coarse protocols (no per-method offers)', async () => {
+  it('falls back to a live 402 probe when the spec only declares coarse protocols', async () => {
     const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.endsWith('/api/openapi.json')) {
@@ -364,27 +290,13 @@ describe('runInspect', () => {
       },
     );
 
-    expect(result.probes.mpp_openapi[0].offers_stripe).toBe(false);
-    expect(result.probes.live_challenge).toMatchObject({
-      attempted: true,
-      method: 'POST',
-      status: 402,
-      found: true,
-      network_id: 'network_abc',
+    expect(result.display_name).toBe('Contribution API');
+    expect(result.description).toBe('Contribute to fund carbon removal.');
+    expect(result.available_tools?.machine_payments?.[0]).toMatchObject({
+      command: "mppx 'https://climate.stripe.dev/api/contribute'",
+      url: 'https://climate.stripe.dev/api/contribute',
     });
-
-    const sptStrategy = result.strategies.find(
-      (s) => s.name === 'shared_payment_token',
-    );
-    expect(sptStrategy?.detected).toBe(true);
-    expect(sptStrategy?.evidence.some((e) => e.includes('network_abc'))).toBe(
-      true,
-    );
-    expect(result.recommendation.strategy).toBe('shared_payment_token');
-    expect(result.recommendation.operation).toMatchObject({
-      path: '/api/contribute',
-      method: 'POST',
-    });
+    expect(result.available_tools).not.toHaveProperty('browser_checkout');
   });
 
   it('does not attempt a live probe when the spec already declares a stripe offer', async () => {
@@ -393,20 +305,18 @@ describe('runInspect', () => {
       if (url.endsWith('/api/openapi.json')) {
         return jsonResponse(mppSpec(['stripe']));
       }
-      if (url === 'https://shop.example.com/checkout') {
-        return htmlResponse('<html><body>Pay here</body></html>');
-      }
       return notFound();
     });
 
-    const result = await runInspect('https://shop.example.com/checkout', {
+    await runInspect('https://shop.example.com/checkout', {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.probes.live_challenge.attempted).toBe(false);
+    const requested = fetchImpl.mock.calls.map(([input]) => input.toString());
+    expect(requested).not.toContain('https://shop.example.com/api/thing');
   });
 
-  it('detects the Link Pay Token steering block in page HTML', async () => {
+  it('adds browser_checkout merchant_advice for Link Pay Token HTML', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url === 'https://shop.example.com/checkout') {
@@ -421,33 +331,35 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.recommendation.strategy).toBe('link_pay_token');
-    expect(result.recommendation.credential_type).toBe('card');
-    expect(result.probes.link_pay_token.found).toBe(true);
-    expect(result.probes.link_pay_token.indicators).toContain(
-      'Page HTML includes the "AiAgentPaymentSteering" component',
+    expect(result.available_tools?.browser_checkout?.merchant_advice).toMatch(
+      /AI-agent steering block/,
     );
+    expect(
+      result.available_tools?.browser_checkout?.general_advice,
+    ).toBeDefined();
+    expect(result.available_tools).not.toHaveProperty('machine_payments');
+    expect(result.available_tools).not.toHaveProperty('mcp');
   });
 
-  it('falls back to card when nothing is detected', async () => {
-    const fetchImpl = vi.fn(async () => notFound());
-
-    const result = await runInspect('https://shop.example.com/checkout', {
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
-
-    expect(result.recommendation.strategy).toBe('card');
-    expect(result.recommendation.credential_type).toBe('card');
-    expect(result.strategies.find((s) => s.name === 'card')?.detected).toBe(
-      true,
-    );
-  });
-
-  it('treats non-JSON responses at well-known endpoints as not found', async () => {
+  it('discovers llms.txt and uses it for identity plus MCP/provisioning tools', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
-      if (url.endsWith('/.well-known/x402.json')) {
-        return htmlResponse('<html>not json</html>');
+      if (url === 'https://shop.example.com/llms.txt') {
+        return textResponse(
+          [
+            '# Shop Co',
+            '',
+            '> Shop Co sells widgets to agents.',
+            '',
+            '## Tools',
+            '- [Shop MCP](https://shop.example.com/mcp)',
+            '',
+            'Provision with `stripe provision shopco`.',
+          ].join('\n'),
+        );
+      }
+      if (url === 'https://shop.example.com/checkout') {
+        return htmlResponse('<html><body>Pay here</body></html>');
       }
       return notFound();
     });
@@ -456,19 +368,56 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.probes.x402.found).toBe(false);
-    expect(result.probes.x402.error).toMatch(/not valid JSON/);
+    expect(result.display_name).toBe('Shop Co');
+    expect(result.description).toBe('Shop Co sells widgets to agents.');
+    expect(result.llms_txt).toEqual(['https://shop.example.com/llms.txt']);
+    expect(result.available_tools?.mcp).toEqual([
+      {
+        command: "'https://shop.example.com/mcp'",
+        description: 'Use MCP to Shop MCP',
+        url: 'https://shop.example.com/mcp',
+      },
+    ]);
+    expect(result.available_tools?.provisioning).toEqual([
+      {
+        command: "stripe provision 'shopco'",
+        description: 'Provision this service using the provisioning API',
+      },
+    ]);
+    expectNoNulls(result);
+  });
+
+  it('discovers MCP servers from well-known manifests', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL) => {
+      const url = input.toString();
+      if (url.endsWith('/.well-known/mcp.json')) {
+        return jsonResponse({
+          name: 'shop-mcp',
+          description: 'Official Shop MCP',
+          remotes: [{ url: 'https://mcp.shop.example.com' }],
+        });
+      }
+      return notFound();
+    });
+
+    const result = await runInspect('https://shop.example.com/checkout', {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.available_tools?.mcp).toEqual([
+      {
+        command: "'https://mcp.shop.example.com'",
+        description: 'Official Shop MCP',
+        url: 'https://mcp.shop.example.com',
+      },
+    ]);
   });
 
   it('sanitizes ANSI escape sequences found in remote content', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
-      if (url === 'https://shop.example.com/checkout') {
-        return htmlResponse(
-          '<div class="AiAgentPaymentSteering">' +
-            '\x1b[31mmalicious\x1b[0m' +
-            '</div>',
-        );
+      if (url === 'https://shop.example.com/llms.txt') {
+        return textResponse('# \x1b[31mShop\x1b[0m\n\n> Widgets');
       }
       return notFound();
     });
@@ -479,6 +428,7 @@ describe('runInspect', () => {
 
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain('\x1b');
+    expect(result.display_name).toBe('Shop');
   });
 
   it('rejects an invalid URL', async () => {

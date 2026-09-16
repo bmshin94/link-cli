@@ -1,15 +1,28 @@
 import { sanitizeDeep } from '../../utils/sanitize-text';
 import { decodeStripeChallenge } from '../mpp/decode';
+import {
+  type BrowserCheckoutTool,
+  type Directory,
+  type DirectoryTool,
+  compactDirectory,
+  extractLlmsTxtUrls,
+  extractMarkdownMcpLinks,
+  extractProvisionSlugs,
+  localDirectoryId,
+  parseLlmsTxtMeta,
+  parseMcpManifest,
+  quoteCommandArg,
+} from './directory';
 
 const DEFAULT_TIMEOUT_MS = 5000;
+const LLMS_TXT_PATHS = ['/llms.txt', '/llms-full.txt'];
+const MCP_WELL_KNOWN_PATHS = [
+  '/.well-known/mcp.json',
+  '/.well-known/mcp',
+  '/.well-known/mcp-server-card',
+];
 
-export type StrategyName =
-  | 'ucp'
-  | 'shared_payment_token'
-  | 'link_pay_token'
-  | 'card';
-
-export type CredentialType = 'shared_payment_token' | 'card';
+export type { Directory, AvailableTools, DirectoryTool } from './directory';
 
 export interface EndpointProbe {
   url: string;
@@ -37,6 +50,7 @@ export interface MppOperation {
 }
 
 export interface MppOpenapiProbe extends EndpointProbe {
+  api_title?: string;
   api_description?: string;
   api_guidance?: string;
   offered_methods?: string[];
@@ -83,7 +97,7 @@ export interface LiveChallengeProbe {
   error?: string;
 }
 
-export interface LinkPayTokenProbe {
+interface LinkPayTokenProbe {
   url: string;
   found: boolean;
   indicators: string[];
@@ -91,53 +105,23 @@ export interface LinkPayTokenProbe {
   error?: string;
 }
 
-export interface Strategy {
-  name: StrategyName;
-  label: string;
-  detected: boolean;
-  priority: number;
-  evidence: string[];
-}
-
-export interface RecommendedOperation {
-  path: string;
-  method: string;
-  description?: string;
-  request_body_schema?: unknown;
-}
-
-export interface RecommendedUcpProfile {
-  profile_url: string;
-  merchant?: string;
-  description?: string;
-  services: UcpServiceEntry[];
-  capabilities: UcpCapabilityEntry[];
-  payment_handlers: UcpPaymentHandlerEntry[];
-}
-
-export interface InspectResult {
+interface PageProbe {
   url: string;
-  hostname: string;
-  probes: {
-    mpp_openapi: MppOpenapiProbe[];
-    x402: EndpointProbe;
-    ucp: UcpProbe;
-    link_pay_token: LinkPayTokenProbe;
-    live_challenge: LiveChallengeProbe;
-  };
-  strategies: Strategy[];
-  recommendation: {
-    strategy: StrategyName;
-    credential_type: CredentialType | null;
-    reason: string;
-    instruction: string;
-    operation?: RecommendedOperation;
-    profile?: RecommendedUcpProfile;
-  };
-  _next?: {
-    command: string;
-    description: string;
-  };
+  status?: number;
+  isHtml: boolean;
+  html?: string;
+  error?: string;
+}
+
+interface LlmsTxtFile {
+  url: string;
+  body: string;
+}
+
+interface DiscoveredMcpServer {
+  url: string;
+  name?: string;
+  description?: string;
 }
 
 type FetchLike = typeof fetch;
@@ -445,6 +429,7 @@ async function probeMppOpenapiEndpoint(
       url,
       found: true,
       status: response.status,
+      api_title: extractApiText(spec, 'title'),
       api_description: extractApiText(spec, 'description'),
       api_guidance: extractApiText(spec, 'guidance'),
       offered_methods: offeredMethods,
@@ -490,34 +475,294 @@ const LINK_PAY_TOKEN_INDICATORS: { pattern: RegExp; label: string }[] = [
   },
 ];
 
-async function probeLinkPayToken(
+async function probePage(
   fetchImpl: FetchLike,
   url: string,
   timeoutMs: number,
-): Promise<LinkPayTokenProbe> {
+): Promise<PageProbe> {
   try {
     const response = await fetchWithTimeout(fetchImpl, url, timeoutMs);
-    if (!response.ok) {
-      return {
-        url,
-        found: false,
-        indicators: [],
-        status: response.status,
-      };
-    }
-    const html = await response.text();
-    const indicators = LINK_PAY_TOKEN_INDICATORS.filter(({ pattern }) =>
-      pattern.test(html),
-    ).map(({ label }) => label);
+    const contentType = response.headers.get('content-type') ?? '';
+    const body = await response.text();
+    const isHtml = contentType.includes('text/html') || /^\s*</.test(body);
     return {
       url,
-      found: indicators.length > 0,
-      indicators,
       status: response.status,
+      isHtml: response.ok && isHtml,
+      html: response.ok && isHtml ? body : undefined,
     };
   } catch (err) {
-    return { url, found: false, indicators: [], error: errorMessage(err) };
+    return { url, isHtml: false, error: errorMessage(err) };
   }
+}
+
+function detectLinkPayToken(page: PageProbe): LinkPayTokenProbe {
+  if (!page.html) {
+    return {
+      url: page.url,
+      found: false,
+      indicators: [],
+      status: page.status,
+      error: page.error,
+    };
+  }
+  const indicators = LINK_PAY_TOKEN_INDICATORS.filter(({ pattern }) =>
+    pattern.test(page.html ?? ''),
+  ).map(({ label }) => label);
+  return {
+    url: page.url,
+    found: indicators.length > 0,
+    indicators,
+    status: page.status,
+  };
+}
+
+function looksLikeLlmsTxt(body: string, contentType: string): boolean {
+  const trimmed = body.replace(/^\uFEFF/, '').trim();
+  if (!trimmed) return false;
+  if (contentType.includes('html') || /^\s*</.test(trimmed)) return false;
+  if (
+    contentType.includes('markdown') ||
+    contentType.includes('text/plain') ||
+    contentType.includes('text/markdown')
+  ) {
+    return true;
+  }
+  return trimmed.startsWith('#') || trimmed.startsWith('>');
+}
+
+async function fetchLlmsTxt(
+  fetchImpl: FetchLike,
+  url: string,
+  timeoutMs: number,
+): Promise<LlmsTxtFile | undefined> {
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, timeoutMs);
+    if (!response.ok) return undefined;
+    const body = await response.text();
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!looksLikeLlmsTxt(body, contentType)) return undefined;
+    return { url, body };
+  } catch {
+    return undefined;
+  }
+}
+
+async function probeLlmsTxt(
+  fetchImpl: FetchLike,
+  origin: string,
+  extraUrls: string[],
+  timeoutMs: number,
+): Promise<LlmsTxtFile[]> {
+  const candidates = [
+    ...LLMS_TXT_PATHS.map((path) => `${origin}${path}`),
+    ...extraUrls,
+  ];
+  const seen = new Set<string>();
+  const files: LlmsTxtFile[] = [];
+  for (const url of candidates) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const file = await fetchLlmsTxt(fetchImpl, url, timeoutMs);
+    if (file) files.push(file);
+  }
+  return files;
+}
+
+async function probeMcpWellKnown(
+  fetchImpl: FetchLike,
+  origin: string,
+  timeoutMs: number,
+): Promise<DiscoveredMcpServer[]> {
+  const found: DiscoveredMcpServer[] = [];
+  const seen = new Set<string>();
+  for (const path of MCP_WELL_KNOWN_PATHS) {
+    try {
+      const url = `${origin}${path}`;
+      const response = await fetchWithTimeout(fetchImpl, url, timeoutMs);
+      if (!response.ok) continue;
+      const text = await response.text();
+      let spec: unknown;
+      try {
+        spec = JSON.parse(text);
+      } catch {
+        continue;
+      }
+      for (const server of parseMcpManifest(spec)) {
+        if (seen.has(server.url)) continue;
+        seen.add(server.url);
+        found.push(server);
+      }
+    } catch {
+      // try the next well-known path
+    }
+  }
+  return found;
+}
+
+function uniqueTools(tools: DirectoryTool[]): DirectoryTool[] {
+  const seen = new Set<string>();
+  const result: DirectoryTool[] = [];
+  for (const tool of tools) {
+    const key = `${tool.command}\0${tool.url ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(tool);
+  }
+  return result;
+}
+
+function buildMachinePaymentTools(
+  origin: string,
+  mppMatch: MppOpenapiProbe | undefined,
+  liveChallenge: LiveChallengeProbe,
+  x402: EndpointProbe,
+): DirectoryTool[] {
+  const tools: DirectoryTool[] = [];
+  const operations = mppMatch?.operations ?? [];
+
+  for (const operation of operations) {
+    const endpoint = new URL(operation.path, origin).toString();
+    const rails = operation.offers.map((offer) => offer.method);
+    const summary =
+      operation.description ??
+      operation.summary ??
+      mppMatch?.api_description ??
+      mppMatch?.api_guidance ??
+      'Pay with the machine payments protocol';
+    const railNote = rails.length ? ` (${rails.join(', ')})` : '';
+    tools.push({
+      command: `mppx ${quoteCommandArg(endpoint)}`,
+      description: `${summary}${railNote}`,
+      url: endpoint,
+    });
+  }
+
+  if (tools.length === 0 && liveChallenge.found && liveChallenge.url) {
+    tools.push({
+      command: `mppx ${quoteCommandArg(liveChallenge.url)}`,
+      description:
+        liveChallenge.description ??
+        'Pay with the machine payments protocol to complete this 402 challenge',
+      url: liveChallenge.url,
+    });
+  }
+
+  if (tools.length === 0 && x402.found) {
+    tools.push({
+      command: `mppx ${quoteCommandArg(x402.url)}`,
+      description: 'Pay with the machine payments protocol (x402)',
+      url: x402.url,
+    });
+  }
+
+  return uniqueTools(tools);
+}
+
+function buildMcpTools(
+  ucp: UcpProbe,
+  wellKnown: DiscoveredMcpServer[],
+  llmsTxt: LlmsTxtFile[],
+): DirectoryTool[] {
+  const tools: DirectoryTool[] = [];
+
+  for (const service of ucp.services ?? []) {
+    if (service.transport !== 'mcp' || !service.endpoint) continue;
+    tools.push({
+      command: quoteCommandArg(service.endpoint),
+      description: `Use MCP for ${service.service}`,
+      url: service.endpoint,
+    });
+  }
+
+  for (const server of wellKnown) {
+    tools.push({
+      command: quoteCommandArg(server.url),
+      description:
+        server.description ??
+        (server.name
+          ? `Use MCP (${server.name})`
+          : 'Use MCP to interact with this service'),
+      url: server.url,
+    });
+  }
+
+  for (const file of llmsTxt) {
+    for (const link of extractMarkdownMcpLinks(file.body)) {
+      tools.push({
+        command: quoteCommandArg(link.url),
+        description: `Use MCP to ${link.name}`,
+        url: link.url,
+      });
+    }
+  }
+
+  return uniqueTools(tools);
+}
+
+function buildProvisioningTools(texts: string[]): DirectoryTool[] {
+  const slugs = new Set<string>();
+  for (const text of texts) {
+    for (const slug of extractProvisionSlugs(text)) {
+      slugs.add(slug);
+    }
+  }
+  return Array.from(slugs).map((slug) => ({
+    command: `stripe provision ${quoteCommandArg(slug)}`,
+    description: 'Provision this service using the provisioning API',
+  }));
+}
+
+function buildBrowserCheckout(
+  page: PageProbe,
+  ucp: UcpProbe,
+  linkPayToken: LinkPayTokenProbe,
+): BrowserCheckoutTool | undefined {
+  if (!page.isHtml) return undefined;
+
+  const merchantAdvice: string[] = [];
+  if (ucp.found) {
+    merchantAdvice.push(
+      'Merchant publishes a UCP profile — use the Universal Commerce Protocol for catalog, cart, and checkout.',
+    );
+  }
+  if (linkPayToken.found) {
+    merchantAdvice.push(
+      'Checkout includes an AI-agent steering block. Create a card spend request and complete the Link Pay Token flow (enable "I am an AI agent" and inject the token from spend-request retrieve --include link_pay_token).',
+    );
+  }
+
+  return {
+    merchant_advice: merchantAdvice.join(' ') || undefined,
+    general_advice:
+      'Create a Link spend request with the default card credential type, get it approved, then enter the returned card details into the site checkout form.',
+  };
+}
+
+function pickDisplayName(
+  ucp: UcpProbe,
+  llmsTxt: LlmsTxtFile[],
+  mppMatch: MppOpenapiProbe | undefined,
+): string | undefined {
+  if (ucp.merchant) return ucp.merchant;
+  for (const file of llmsTxt) {
+    const title = parseLlmsTxtMeta(file.body).title;
+    if (title) return title;
+  }
+  return mppMatch?.api_title;
+}
+
+function pickDescription(
+  ucp: UcpProbe,
+  llmsTxt: LlmsTxtFile[],
+  mppMatch: MppOpenapiProbe | undefined,
+): string | undefined {
+  if (ucp.description) return ucp.description;
+  for (const file of llmsTxt) {
+    const summary = parseLlmsTxtMeta(file.body).summary;
+    if (summary) return summary;
+  }
+  return mppMatch?.api_description;
 }
 
 // Prefer an operation that already declares a "stripe" offer; otherwise fall
@@ -664,178 +909,55 @@ async function probeLiveChallenge(
   }
 }
 
-const RECOMMENDATION_REASONS: Record<StrategyName, string> = {
-  ucp: 'Merchant speaks the Universal Commerce Protocol (UCP) — use the ucp CLI for full catalog/cart/checkout support.',
-  shared_payment_token:
-    'Merchant exposes a Machine Payment Protocol (MPP) endpoint that accepts the "stripe" payment method — create a spend request and use "link-cli mpp pay" to complete the 402 flow.',
-  link_pay_token:
-    'Checkout page includes an AI-agent steering block — use the Link Pay Token flow (requires browser automation) to pay without exposing card numbers.',
-  card: "No agent-native payment protocol detected — use the default 'card' credential type and complete checkout on the page's own payment form.",
-};
+function toDirectory(input: {
+  origin: string;
+  page: PageProbe;
+  ucp: UcpProbe;
+  mppMatch: MppOpenapiProbe | undefined;
+  liveChallenge: LiveChallengeProbe;
+  x402: EndpointProbe;
+  linkPayToken: LinkPayTokenProbe;
+  llmsTxt: LlmsTxtFile[];
+  mcpServers: DiscoveredMcpServer[];
+}): Directory {
+  const machinePayments = buildMachinePaymentTools(
+    input.origin,
+    input.mppMatch,
+    input.liveChallenge,
+    input.x402,
+  );
+  const mcp = buildMcpTools(input.ucp, input.mcpServers, input.llmsTxt);
+  const provisioning = buildProvisioningTools([
+    input.page.html ?? '',
+    ...input.llmsTxt.map((file) => file.body),
+  ]);
+  const browserCheckout = buildBrowserCheckout(
+    input.page,
+    input.ucp,
+    input.linkPayToken,
+  );
 
-// Only 'card' and 'shared_payment_token' map to link-cli spend-request's
-// --credential-type flag; 'ucp' is a fully separate protocol/CLI, and
-// 'link_pay_token' rides on a 'card' spend request under the hood.
-const RECOMMENDATION_CREDENTIAL_TYPES: Record<
-  StrategyName,
-  CredentialType | null
-> = {
-  ucp: null,
-  shared_payment_token: 'shared_payment_token',
-  link_pay_token: 'card',
-  card: 'card',
-};
-
-const RECOMMENDATION_INSTRUCTIONS: Record<StrategyName, string> = {
-  ucp: 'Run `ucp discover --business <origin>` to confirm merchant capabilities, then use ucp cart/checkout commands against the endpoints in `recommendation.profile.services`/`capabilities` to complete the purchase.',
-  shared_payment_token:
-    'Create a spend request with `--credential-type shared_payment_token`, get it approved, then run `link-cli mpp pay <url> --spend-request-id <id>` against the operation in `recommendation.operation` (and `--data`/`--method` matching its `request_body_schema`) to complete the 402 flow.',
-  link_pay_token:
-    'Create a spend request (default `card` credential type), get it approved, open the checkout page, and follow the Link Pay Token flow (check the "I am an AI agent" checkbox, inject the token from `spend-request retrieve <id> --include link_pay_token`).',
-  card: 'Create a spend request with the default `card` credential type, get it approved, then run `spend-request retrieve <id> --include card` and enter the returned card details into the checkout form.',
-};
-
-function buildNextAction(
-  strategy: StrategyName,
-  origin: string,
-): InspectResult['_next'] {
-  if (strategy === 'ucp') {
-    return {
-      command: `ucp discover --business ${origin}`,
-      description: 'Confirm UCP capabilities for this merchant',
-    };
-  }
-  return undefined;
-}
-
-function buildUcpEvidence(ucpProbe: UcpProbe): string[] {
-  if (!ucpProbe.found) return [];
-  const merchant = ucpProbe.merchant ? ` for "${ucpProbe.merchant}"` : '';
-  const serviceCount = ucpProbe.services?.length ?? 0;
-  const capabilityCount = ucpProbe.capabilities?.length ?? 0;
-  return [
-    `${ucpProbe.url} responded with a UCP merchant profile${merchant} (${serviceCount} service${serviceCount === 1 ? '' : 's'}, ${capabilityCount} capabilit${capabilityCount === 1 ? 'y' : 'ies'})`,
-  ];
-}
-
-function buildMppEvidence(
-  mppMatch: MppOpenapiProbe | undefined,
-  liveChallenge: LiveChallengeProbe,
-): string[] {
-  const evidence: string[] = [];
-  if (mppMatch) {
-    const methods = mppMatch.offered_methods ?? [];
-    if (mppMatch.offers_stripe) {
-      const others = methods.filter((m) => m !== 'stripe');
-      evidence.push(
-        `${mppMatch.url} offers the "stripe" payment method${others.length ? ` (alongside ${others.join(', ')})` : ''}`,
-      );
-    } else {
-      evidence.push(
-        `${mppMatch.url} responded with an MPP spec but does not explicitly declare the "stripe" payment method${methods.length ? ` (offers: ${methods.join(', ')})` : ' (no per-method offers declared)'}`,
-      );
-    }
-  }
-  if (liveChallenge.found) {
-    evidence.push(
-      `Live ${liveChallenge.method} ${liveChallenge.url} returned HTTP 402 with a "stripe" payment challenge (network_id: ${liveChallenge.network_id})`,
-    );
-  } else if (liveChallenge.attempted && !mppMatch?.offers_stripe) {
-    evidence.push(
-      `Live ${liveChallenge.method} ${liveChallenge.url} did not confirm stripe support (status: ${liveChallenge.status ?? 'error'}${liveChallenge.error ? `, ${liveChallenge.error}` : ''})`,
-    );
-  }
-  return evidence;
-}
-
-function buildStrategies(
-  probes: InspectResult['probes'],
-  mppMatch: MppOpenapiProbe | undefined,
-): Strategy[] {
-  const mppOffersStripe = mppMatch?.offers_stripe ?? false;
-  const detected = mppOffersStripe || probes.live_challenge.found;
-
-  const strategies: Strategy[] = [
-    {
-      name: 'ucp',
-      label: 'Universal Commerce Protocol (UCP)',
-      detected: probes.ucp.found,
-      priority: 1,
-      evidence: buildUcpEvidence(probes.ucp),
+  const directory: Directory = {
+    id: localDirectoryId(input.origin),
+    display_name: pickDisplayName(input.ucp, input.llmsTxt, input.mppMatch),
+    description: pickDescription(input.ucp, input.llmsTxt, input.mppMatch),
+    url: input.origin,
+    llms_txt: input.llmsTxt.map((file) => file.url),
+    available_tools: {
+      machine_payments: machinePayments,
+      mcp,
+      provisioning,
+      browser_checkout: browserCheckout,
     },
-    {
-      name: 'shared_payment_token',
-      label: 'Machine Payment Protocol (MPP) shared payment token',
-      detected,
-      priority: 2,
-      evidence: buildMppEvidence(mppMatch, probes.live_challenge),
-    },
-    {
-      name: 'link_pay_token',
-      label: 'Link Pay Token (AI-agent steering block)',
-      detected: probes.link_pay_token.found,
-      priority: 3,
-      evidence: probes.link_pay_token.indicators,
-    },
-    {
-      name: 'card',
-      label: 'Virtual card (default fallback)',
-      detected: true,
-      priority: 4,
-      evidence: [
-        'Always available via Link — no merchant-side support required',
-      ],
-    },
-  ];
-
-  return strategies.sort((a, b) => {
-    if (a.detected !== b.detected) return a.detected ? -1 : 1;
-    return a.priority - b.priority;
-  });
-}
-
-function buildRecommendedOperation(
-  strategy: StrategyName,
-  operation: MppOperation | undefined,
-  liveChallenge: LiveChallengeProbe,
-): RecommendedOperation | undefined {
-  if (strategy !== 'shared_payment_token') return undefined;
-  if (operation) {
-    return {
-      path: operation.path,
-      method: operation.method,
-      description: operation.description ?? operation.summary,
-      request_body_schema: operation.request_body_schema,
-    };
-  }
-  if (liveChallenge.found && liveChallenge.url) {
-    return {
-      path: new URL(liveChallenge.url).pathname,
-      method: liveChallenge.method ?? 'GET',
-    };
-  }
-  return undefined;
-}
-
-function buildRecommendedProfile(
-  strategy: StrategyName,
-  ucpProbe: UcpProbe,
-): RecommendedUcpProfile | undefined {
-  if (strategy !== 'ucp' || !ucpProbe.found) return undefined;
-  return {
-    profile_url: ucpProbe.url,
-    merchant: ucpProbe.merchant,
-    description: ucpProbe.description,
-    services: ucpProbe.services ?? [],
-    capabilities: ucpProbe.capabilities ?? [],
-    payment_handlers: ucpProbe.payment_handlers ?? [],
   };
+
+  return compactDirectory(sanitizeDeep(directory));
 }
 
 export async function runInspect(
   url: string,
   opts: { fetchImpl?: FetchLike; timeoutMs?: number } = {},
-): Promise<InspectResult> {
+): Promise<Directory> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -847,12 +969,21 @@ export async function runInspect(
   }
   const origin = `${parsed.protocol}//${parsed.host}`;
 
-  const [mppOpenapi, x402, ucp, linkPayToken] = await Promise.all([
+  const [mppOpenapi, x402, ucp, page, wellKnownMcp] = await Promise.all([
     probeMppOpenapi(fetchImpl, origin, timeoutMs),
     probeJsonEndpoint(fetchImpl, `${origin}/.well-known/x402.json`, timeoutMs),
     probeUcpEndpoint(fetchImpl, `${origin}/.well-known/ucp`, timeoutMs),
-    probeLinkPayToken(fetchImpl, url, timeoutMs),
+    probePage(fetchImpl, url, timeoutMs),
+    probeMcpWellKnown(fetchImpl, origin, timeoutMs),
   ]);
+
+  const extraLlmsUrls = page.html ? extractLlmsTxtUrls(page.html, origin) : [];
+  const llmsTxt = await probeLlmsTxt(
+    fetchImpl,
+    origin,
+    extraLlmsUrls,
+    timeoutMs,
+  );
 
   const mppMatch = mppOpenapi.find((p) => p.found);
   const operation = pickPaymentOperation(mppMatch?.operations);
@@ -868,32 +999,17 @@ export async function runInspect(
       }
     : await probeLiveChallenge(fetchImpl, origin, url, operation, timeoutMs);
 
-  const probes: InspectResult['probes'] = {
-    mpp_openapi: mppOpenapi,
-    x402,
+  const linkPayToken = detectLinkPayToken(page);
+
+  return toDirectory({
+    origin,
+    page,
     ucp,
-    link_pay_token: linkPayToken,
-    live_challenge: liveChallenge,
-  };
-
-  const strategies = buildStrategies(probes, mppMatch);
-  const top = strategies[0];
-
-  const result: InspectResult = {
-    url,
-    hostname: parsed.hostname,
-    probes,
-    strategies,
-    recommendation: {
-      strategy: top.name,
-      credential_type: RECOMMENDATION_CREDENTIAL_TYPES[top.name],
-      reason: RECOMMENDATION_REASONS[top.name],
-      instruction: RECOMMENDATION_INSTRUCTIONS[top.name],
-      operation: buildRecommendedOperation(top.name, operation, liveChallenge),
-      profile: buildRecommendedProfile(top.name, ucp),
-    },
-    _next: buildNextAction(top.name, origin),
-  };
-
-  return sanitizeDeep(result);
+    mppMatch,
+    liveChallenge,
+    x402,
+    linkPayToken,
+    llmsTxt,
+    mcpServers: wellKnownMcp,
+  });
 }

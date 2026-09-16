@@ -3,13 +3,38 @@ import Spinner from 'ink-spinner';
 import type React from 'react';
 import { useCallback } from 'react';
 import { useAsyncAction } from '../../hooks/use-async-action';
-import type { InspectResult } from './inspect';
+import type { Directory, DirectoryTool } from './directory';
 import { runInspect } from './inspect';
 
 interface InspectViewProps {
   url: string;
   timeoutMs?: number;
-  onComplete: (result: InspectResult | null) => void;
+  onComplete: (result: Directory | null) => void;
+}
+
+function ToolList({
+  label,
+  tools,
+}: {
+  label: string;
+  tools: DirectoryTool[];
+}) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text bold>{label}</Text>
+      {tools.map((tool) => (
+        <Box
+          key={`${tool.command}:${tool.url ?? ''}`}
+          flexDirection="column"
+          paddingLeft={2}
+        >
+          <Text color="green">{tool.command}</Text>
+          <Text dimColor>{tool.description}</Text>
+          {tool.url ? <Text dimColor>{tool.url}</Text> : null}
+        </Box>
+      ))}
+    </Box>
+  );
 }
 
 export const InspectView: React.FC<InspectViewProps> = ({
@@ -23,7 +48,7 @@ export const InspectView: React.FC<InspectViewProps> = ({
     [url, timeoutMs],
   );
   const handleComplete = useCallback(
-    (result: InspectResult | null) => {
+    (result: Directory | null) => {
       onComplete(result);
       exit();
     },
@@ -52,32 +77,40 @@ export const InspectView: React.FC<InspectViewProps> = ({
 
   if (!data) return null;
 
+  const tools = data.available_tools;
+
   return (
     <Box flexDirection="column">
       <Text>
-        Payment strategies for <Text bold>{data.hostname}</Text>:
+        Directory for <Text bold>{data.display_name ?? data.url}</Text>
       </Text>
-      <Box flexDirection="column" marginTop={1} paddingX={2}>
-        {data.strategies.map((strategy) => (
-          <Box key={strategy.name} flexDirection="column" marginBottom={1}>
-            <Text color={strategy.detected ? 'green' : 'gray'}>
-              {strategy.detected ? '✓' : '✗'} {strategy.label}
-            </Text>
-            {strategy.evidence.map((line, i) => (
-              <Text key={`${strategy.name}-${i}`} dimColor>
-                {'    '}
-                {line}
-              </Text>
-            ))}
+      {data.display_name ? <Text dimColor>{data.url}</Text> : null}
+      {data.description ? <Text>{data.description}</Text> : null}
+      {data.llms_txt ? (
+        <Text dimColor>llms.txt: {data.llms_txt.join(', ')}</Text>
+      ) : null}
+      <Box flexDirection="column" marginTop={1}>
+        {tools?.machine_payments ? (
+          <ToolList label="Machine payments" tools={tools.machine_payments} />
+        ) : null}
+        {tools?.mcp ? <ToolList label="MCP" tools={tools.mcp} /> : null}
+        {tools?.provisioning ? (
+          <ToolList label="Provisioning" tools={tools.provisioning} />
+        ) : null}
+        {tools?.browser_checkout ? (
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold>Browser checkout</Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {tools.browser_checkout.merchant_advice ? (
+                <Text>Merchant: {tools.browser_checkout.merchant_advice}</Text>
+              ) : null}
+              {tools.browser_checkout.general_advice ? (
+                <Text dimColor>{tools.browser_checkout.general_advice}</Text>
+              ) : null}
+            </Box>
           </Box>
-        ))}
-      </Box>
-      <Text color="green">
-        Recommendation: <Text bold>{data.recommendation.strategy}</Text>
-      </Text>
-      <Text>{data.recommendation.reason}</Text>
-      <Box marginTop={1}>
-        <Text dimColor>{data.recommendation.instruction}</Text>
+        ) : null}
+        {!tools ? <Text dimColor>No available tools detected.</Text> : null}
       </Box>
     </Box>
   );
