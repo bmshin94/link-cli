@@ -208,7 +208,7 @@ describe('runInspect', () => {
     expectNoNulls(result);
   });
 
-  it('maps stripe MPP operations onto machine_payments tools', async () => {
+  it('maps stripe offers to link-cli mpp pay and tempo offers to tempo request', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url.endsWith('/api/openapi.json')) {
@@ -227,9 +227,16 @@ describe('runInspect', () => {
     expect(result.display_name).toBe('Test API');
     expect(result.available_tools?.machine_payments).toEqual([
       {
-        command: "mppx 'https://shop.example.com/api/thing'",
-        description: 'Fetch a thing (tempo, stripe)',
+        command: "link-cli mpp pay 'https://shop.example.com/api/thing'",
+        description: 'Fetch a thing',
         url: 'https://shop.example.com/api/thing',
+        method: 'stripe',
+      },
+      {
+        command: "tempo request 'https://shop.example.com/api/thing'",
+        description: 'Fetch a thing',
+        url: 'https://shop.example.com/api/thing',
+        method: 'tempo',
       },
     ]);
   });
@@ -255,7 +262,7 @@ describe('runInspect', () => {
     );
   });
 
-  it('still lists crypto-only MPP operations as machine_payments tools', async () => {
+  it('recommends tempo CLI only for tempo MPP offers, ignoring other crypto rails', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url.endsWith('/api/openapi.json')) {
@@ -268,9 +275,14 @@ describe('runInspect', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.available_tools?.machine_payments?.[0].description).toMatch(
-      /tempo, evm, solana/,
-    );
+    expect(result.available_tools?.machine_payments).toEqual([
+      {
+        command: "tempo request 'https://shop.example.com/api/thing'",
+        description: 'Fetch a thing',
+        url: 'https://shop.example.com/api/thing',
+        method: 'tempo',
+      },
+    ]);
   });
 
   it('falls back to a live 402 probe when the spec only declares coarse protocols', async () => {
@@ -302,8 +314,10 @@ describe('runInspect', () => {
     expect(result.display_name).toBe('Contribution API');
     expect(result.description).toBe('Contribute to fund carbon removal.');
     expect(result.available_tools?.machine_payments?.[0]).toMatchObject({
-      command: "mppx 'https://climate.stripe.dev/api/contribute'",
+      command:
+        "link-cli mpp pay 'https://climate.stripe.dev/api/contribute' --method POST",
       url: 'https://climate.stripe.dev/api/contribute',
+      method: 'stripe',
     });
     expect(result.available_tools).not.toHaveProperty('browser_checkout');
   });
@@ -582,9 +596,10 @@ describe('inspect fake merchant', () => {
       available_tools: {
         machine_payments: [
           {
-            command: `mppx '${HEADLESS_ORIGIN}/api/orders'`,
-            description: 'Pay with MPP to create an order (stripe)',
+            command: `link-cli mpp pay '${HEADLESS_ORIGIN}/api/orders' --method POST`,
+            description: 'Pay with MPP to create an order',
             url: `${HEADLESS_ORIGIN}/api/orders`,
+            method: 'stripe',
           },
         ],
         mcp: [

@@ -13,6 +13,8 @@ export interface InspectTool {
   command: string;
   description: string;
   url?: string;
+  /** MPP payment rail, when known. Omitted for non-MPP tools. */
+  method?: string;
 }
 
 export interface BrowserCheckoutTool {
@@ -782,12 +784,47 @@ function uniqueTools(tools: InspectTool[]): InspectTool[] {
   const seen = new Set<string>();
   const result: InspectTool[] = [];
   for (const tool of tools) {
-    const key = `${tool.command}\0${tool.url ?? ''}`;
+    const key = `${tool.command}\0${tool.url ?? ''}\0${tool.method ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(tool);
   }
   return result;
+}
+
+function tempoRequestCommand(url: string, httpMethod?: string): string {
+  const quoted = quoteCommandArg(url);
+  const verb = httpMethod?.toUpperCase();
+  if (verb && verb !== 'GET') {
+    return `tempo request -X ${verb} ${quoted}`;
+  }
+  return `tempo request ${quoted}`;
+}
+
+function linkCliMppPayCommand(url: string, httpMethod?: string): string {
+  const quoted = quoteCommandArg(url);
+  const verb = httpMethod?.toUpperCase();
+  if (verb && verb !== 'GET') {
+    return `link-cli mpp pay ${quoted} --method ${verb}`;
+  }
+  return `link-cli mpp pay ${quoted}`;
+}
+
+function machinePaymentTool(
+  url: string,
+  httpMethod: string | undefined,
+  rail: 'stripe' | 'tempo',
+  description: string,
+): InspectTool {
+  return {
+    command:
+      rail === 'stripe'
+        ? linkCliMppPayCommand(url, httpMethod)
+        : tempoRequestCommand(url, httpMethod),
+    description,
+    url,
+    method: rail,
+  };
 }
 
 function buildMachinePaymentTools(
@@ -801,34 +838,48 @@ function buildMachinePaymentTools(
 
   for (const operation of operations) {
     const endpoint = new URL(operation.path, origin).toString();
-    const rails = operation.offers.map((offer) => offer.method);
+    const rails = new Set(
+      operation.offers.map((offer) => offer.method.toLowerCase()),
+    );
     const summary =
       operation.description ??
       operation.summary ??
       mppMatch?.api_description ??
       mppMatch?.api_guidance ??
       'Pay with the machine payments protocol';
-    const railNote = rails.length ? ` (${rails.join(', ')})` : '';
-    tools.push({
-      command: `mppx ${quoteCommandArg(endpoint)}`,
-      description: `${summary}${railNote}`,
-      url: endpoint,
-    });
+
+    if (rails.has('stripe')) {
+      tools.push(
+        machinePaymentTool(endpoint, operation.method, 'stripe', summary),
+      );
+    }
+    if (rails.has('tempo')) {
+      tools.push(
+        machinePaymentTool(endpoint, operation.method, 'tempo', summary),
+      );
+    }
   }
 
-  if (tools.length === 0 && liveChallenge.found && liveChallenge.url) {
-    tools.push({
-      command: `mppx ${quoteCommandArg(liveChallenge.url)}`,
-      description:
-        liveChallenge.description ??
-        'Pay with the machine payments protocol to complete this 402 challenge',
-      url: liveChallenge.url,
-    });
+  if (liveChallenge.found && liveChallenge.url) {
+    const alreadyHasStripe = tools.some(
+      (tool) => tool.method === 'stripe' && tool.url === liveChallenge.url,
+    );
+    if (!alreadyHasStripe) {
+      tools.push(
+        machinePaymentTool(
+          liveChallenge.url,
+          liveChallenge.method,
+          'stripe',
+          liveChallenge.description ??
+            'Pay with the machine payments protocol to complete this 402 challenge',
+        ),
+      );
+    }
   }
 
   if (tools.length === 0 && x402.found) {
     tools.push({
-      command: `mppx ${quoteCommandArg(x402.url)}`,
+      command: tempoRequestCommand(x402.url),
       description: 'Pay with the machine payments protocol (x402)',
       url: x402.url,
     });

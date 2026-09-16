@@ -367,7 +367,7 @@ Required field: `url` (the origin of the inspected URL). Optional fields are omi
 
 It probes `llms.txt`, a [UCP](https://ucp.dev) profile at `/.well-known/ucp`, an [MPP](https://mpp.dev) OpenAPI spec at `/api/openapi.json` or `/openapi.json`, MCP well-known manifests, provisioning command mentions, and the page HTML for a Link Pay Token steering block. Matching capabilities are returned under `available_tools`:
 
-- `machine_payments[]` — `mppx '<endpoint>'` plus description and URL
+- `machine_payments[]` — one entry per known MPP rail (`method: stripe` → `link-cli mpp pay '<endpoint>'`; `method: tempo` → `tempo request '<endpoint>'`)
 - `mcp[]` — MCP server command, description, and URL
 - `provisioning[]` — `stripe provision '<slug>'`
 - `browser_checkout` — `merchant_advice` / `general_advice` for paying in a browser with a Link card
