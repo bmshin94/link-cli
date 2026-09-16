@@ -123,8 +123,8 @@ Key input field notes:
   - **UCP:** `<origin>/.well-known/ucp`. Merchant/description fill `display_name` / `description`; `transport: mcp` services become `available_tools.mcp`.
   - **MPP / x402:** `<origin>/api/openapi.json` then `/openapi.json` (offer-aware, per https://mpp.dev/advanced/discovery), `<origin>/.well-known/x402.json`, and a live 402 probe when the spec doesn't already declare a `"stripe"` offer. Payment operations become `available_tools.machine_payments`, one tool per known rail: `method: "stripe"` → `link-cli mpp pay '<endpoint>'` (plus `--method` when not GET); `method: "tempo"` → `tempo request '<endpoint>'` (plus `-X` when not GET). Other offer methods are ignored. `method` is omitted when the rail is unknown (x402 last-resort fallback).
   - **MCP:** `/.well-known/mcp.json`, `/.well-known/mcp`, `/.well-known/mcp-server-card`, UCP MCP transports, and MCP links in llms.txt.
-  - **Provisioning:** `stripe provision <slug>` / `stripe projects add <slug>` mentions in page HTML or llms.txt become `available_tools.provisioning`.
   - **Browser checkout:** when the inspected URL returns HTML. `general_advice` describes the Link card flow; `merchant_advice` is added for UCP and/or a Link Pay Token steering block (`AiAgentPaymentSteering`, "I am an AI agent", `link_pay_token`).
+  - `available_tools.provisioning` exists on the result type but is not populated yet.
 - `inspect` fetches arbitrary third-party HTML/JSON directly (no SDK resource) — `toInspectResult()` runs `sanitizeDeep()` then omits empty optional fields before JSON or interactive output sees the result.
 
 ### demo command

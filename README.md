@@ -365,11 +365,10 @@ link-cli inspect https://shop.example.com/checkout
 
 Required field: `url` (the origin of the inspected URL). Optional fields are omitted when unknown (`display_name`, `description`, `llms_txt`, and each `available_tools` section).
 
-It probes `llms.txt`, a [UCP](https://ucp.dev) profile at `/.well-known/ucp`, an [MPP](https://mpp.dev) OpenAPI spec at `/api/openapi.json` or `/openapi.json`, MCP well-known manifests, provisioning command mentions, and the page HTML for a Link Pay Token steering block. Matching capabilities are returned under `available_tools`:
+It probes `llms.txt`, a [UCP](https://ucp.dev) profile at `/.well-known/ucp`, an [MPP](https://mpp.dev) OpenAPI spec at `/api/openapi.json` or `/openapi.json`, MCP well-known manifests, and the page HTML for a Link Pay Token steering block. Matching capabilities are returned under `available_tools`:
 
 - `machine_payments[]` — one entry per known MPP rail (`method: stripe` → `link-cli mpp pay '<endpoint>'`; `method: tempo` → `tempo request '<endpoint>'`)
 - `mcp[]` — MCP server command, description, and URL
-- `provisioning[]` — `stripe provision '<slug>'`
 - `browser_checkout` — `merchant_advice` / `general_advice` for paying in a browser with a Link card
 
 For MPP, it inspects each operation's `x-payment-info.offers[]` per the [MPP discovery spec](https://mpp.dev/advanced/discovery). When a spec doesn't break offers out by method, it falls back to a live probe of the endpoint and reads the real `WWW-Authenticate` challenge.

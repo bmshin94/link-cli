@@ -25,6 +25,7 @@ export interface BrowserCheckoutTool {
 export interface AvailableTools {
   machine_payments?: InspectTool[];
   mcp?: InspectTool[];
+  /** Reserved. Inspect does not populate this yet. */
   provisioning?: InspectTool[];
   browser_checkout?: BrowserCheckoutTool;
 }
@@ -929,19 +930,6 @@ function buildMcpTools(
   return uniqueTools(tools);
 }
 
-function buildProvisioningTools(texts: string[]): InspectTool[] {
-  const slugs = new Set<string>();
-  for (const text of texts) {
-    for (const slug of extractProvisionSlugs(text)) {
-      slugs.add(slug);
-    }
-  }
-  return Array.from(slugs).map((slug) => ({
-    command: `stripe provision ${quoteCommandArg(slug)}`,
-    description: 'Provision this service using the provisioning API',
-  }));
-}
-
 function buildBrowserCheckout(
   page: PageProbe,
   ucp: UcpProbe,
@@ -1156,10 +1144,6 @@ function toInspectResult(input: {
     input.x402,
   );
   const mcp = buildMcpTools(input.ucp, input.mcpServers, input.llmsTxt);
-  const provisioning = buildProvisioningTools([
-    input.page.html ?? '',
-    ...input.llmsTxt.map((file) => file.body),
-  ]);
   const browserCheckout = buildBrowserCheckout(
     input.page,
     input.ucp,
@@ -1174,7 +1158,6 @@ function toInspectResult(input: {
     available_tools: {
       machine_payments: machinePayments,
       mcp,
-      provisioning,
       browser_checkout: browserCheckout,
     },
   };

@@ -11,13 +11,7 @@ interface InspectViewProps {
   onComplete: (result: InspectResult | null) => void;
 }
 
-function ToolList({
-  label,
-  tools,
-}: {
-  label: string;
-  tools: InspectTool[];
-}) {
+function ToolList({ label, tools }: { label: string; tools: InspectTool[] }) {
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text bold>{label}</Text>

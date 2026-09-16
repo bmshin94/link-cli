@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  type InspectResult,
   compactInspectResult,
   extractLlmsTxtUrls,
   extractMarkdownMcpLinks,
   extractProvisionSlugs,
+  type InspectResult,
   parseLlmsTxtMeta,
   parseMcpManifest,
   quoteCommandArg,
@@ -364,7 +364,7 @@ describe('runInspect', () => {
     expect(result.available_tools).not.toHaveProperty('mcp');
   });
 
-  it('discovers llms.txt and uses it for identity plus MCP/provisioning tools', async () => {
+  it('discovers llms.txt and uses it for identity plus MCP tools', async () => {
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = input.toString();
       if (url === 'https://shop.example.com/llms.txt') {
@@ -401,12 +401,7 @@ describe('runInspect', () => {
         url: 'https://shop.example.com/mcp',
       },
     ]);
-    expect(result.available_tools?.provisioning).toEqual([
-      {
-        command: "stripe provision 'shopco'",
-        description: 'Provision this service using the provisioning API',
-      },
-    ]);
+    expect(result.available_tools).not.toHaveProperty('provisioning');
     expectNoNulls(result);
   });
 
@@ -617,12 +612,6 @@ describe('inspect fake merchant', () => {
             command: `'${HEADLESS_ORIGIN}/agents/mcp'`,
             description: 'Use MCP to Agents MCP',
             url: `${HEADLESS_ORIGIN}/agents/mcp`,
-          },
-        ],
-        provisioning: [
-          {
-            command: "stripe provision 'headlessmerchant'",
-            description: 'Provision this service using the provisioning API',
           },
         ],
         browser_checkout: {
