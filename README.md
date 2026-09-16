@@ -355,9 +355,9 @@ card SpendRequest instead; do not create an LPT request.
 | Hourly creation rate | 50 per hour |
 | Rolling creation rate | 200 per 60 days |
 
-### Inspect a merchant site
+### Inspect a merchant site (beta)
 
-Before creating a spend request, use `inspect` to discover how agents can engage the site. It returns a **Directory** object (the same shape a future Directory API is expected to return), built locally from site probes:
+`inspect` is a beta command. Before creating a spend request, use it to discover how agents can engage the site. It returns a **Directory** object (the same shape a future Directory API is expected to return), built locally from site probes:
 
 ```bash
 link-cli inspect https://shop.example.com/checkout

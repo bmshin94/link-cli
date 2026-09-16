@@ -9,7 +9,7 @@ import { inspectOptions } from './schema';
 export function createInspectCli() {
   const cli = Cli.create('inspect', {
     description:
-      'Inspect a URL and return a Directory listing of available agent tools (machine payments, MCP, provisioning, browser checkout)',
+      '[beta] Inspect a URL and return a Directory listing of available agent tools (machine payments, MCP, provisioning, browser checkout)',
     args: z.object({
       url: z.string().describe('URL to inspect'),
     }),

@@ -125,11 +125,10 @@ Optionally, before a purchase, run `link-cli user-info retrieve` to inspect any 
 
 **Determine how the merchant accepts payment:**
 
-1. **Run `link-cli inspect <merchant-url>`** — it returns a Directory object of available tools (`machine_payments`, `mcp`, `provisioning`, `browser_checkout`) plus identity fields. Optional fields are omitted when unknown. Use the returned tools to choose the payment path; do not guess.
-2. **If `available_tools.machine_payments` is present** — the site accepts MPP. Pay with the returned `command` (`mppx '<url>'`) or `link-cli mpp pay`. Use `shared_payment_token` when the tool description includes the `stripe` rail (or after a 402 with `method="stripe"`).
-3. **If `available_tools.browser_checkout.merchant_advice` mentions a Link Pay Token / AI-agent steering block** (or you find `.AiAgentPaymentSteering` / "I am an AI agent" in the DOM, typically inside a Stripe iframe) — it may support the **Link Pay Token flow** (Step 5, "Link Pay Token" section). **Requires browser automation.** Before creating an LPT request, check the checkbox and verify that both `input[name="link_pay_token"]` and `data-stripe-merchant-account` appear in the same frame. Read the account ID from that attribute. If either marker does **not** appear, follow the block's on-page instructions and use `card` instead. Without browser automation, use `card`.
-4. **If `available_tools.browser_checkout` is present without a Link Pay Token hint** — use `card`.
-5. **If inspect finds no tools**, still **navigate to the merchant page** — browse it, read the page content, and understand how the site accepts payment. A credit-card form means `card`. An API that returns **HTTP 402** with `method="stripe"` means `shared_payment_token`.
+1. **Navigate to the merchant page** — browse it, read the page content, and understand how the site accepts payment.
+2. **If the checkout page includes the AI-agent steering block** (find the "I am an AI agent" checkbox, or the `.AiAgentPaymentSteering` container — visually hidden but present in the DOM, typically inside a Stripe iframe) — it may support the **Link Pay Token flow** (Step 5, "Link Pay Token" section). **Requires browser automation.** Before creating an LPT request, check the checkbox and verify that both `input[name="link_pay_token"]` and `data-stripe-merchant-account` appear in the same frame. Read the account ID from that attribute. If either marker does **not** appear, follow the block's on-page instructions and use `card` instead. Without browser automation, use `card`.
+3. **If the page has a credit-card form and no AI-agent steering block** (no "I am an AI agent" checkbox / `.AiAgentPaymentSteering`) — use `card`.
+4. **If the page describes an API or programmatic payment flow** — make a request to the relevant endpoint. If it returns **HTTP 402** with a `www-authenticate` header, use `shared_payment_token`.
 
 What you find determines which credential type to use:
 

@@ -435,3 +435,196 @@ describe('runInspect', () => {
     await expect(runInspect('not-a-url')).rejects.toThrow(/Invalid URL/);
   });
 });
+
+const HEADLESS_ORIGIN = 'https://myheadlessmerchant.com';
+const HEADLESS_CHECKOUT = `${HEADLESS_ORIGIN}/checkout`;
+
+/**
+ * In-process fake of myheadlessmerchant.com: one fetch router that serves
+ * every inspect probe path (OpenAPI MPP, x402, UCP, HTML/LPT, MCP, llms.txt,
+ * provisioning copy).
+ */
+function fakeHeadlessMerchant(): typeof fetch {
+  const routes: Record<string, () => Response> = {
+    [`${HEADLESS_ORIGIN}/api/openapi.json`]: () =>
+      jsonResponse({
+        openapi: '3.1.0',
+        info: {
+          title: 'Headless Merchant API',
+          version: '1.0.0',
+          description: 'Pay-per-call catalog for headless checkout.',
+        },
+        paths: {
+          '/api/orders': {
+            post: {
+              operationId: 'createOrder',
+              summary: 'Create an order',
+              description: 'Pay with MPP to create an order',
+              'x-payment-info': {
+                offers: [
+                  {
+                    method: 'stripe',
+                    intent: 'charge',
+                    amount: '2500',
+                    currency: 'usd',
+                  },
+                ],
+              },
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['sku'],
+                      properties: { sku: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+              responses: { 200: { description: 'ok' } },
+            },
+          },
+        },
+      }),
+    [`${HEADLESS_ORIGIN}/.well-known/x402.json`]: () =>
+      jsonResponse({
+        x402Version: 1,
+        accepts: [{ scheme: 'exact', network: 'stripe' }],
+      }),
+    [`${HEADLESS_ORIGIN}/.well-known/ucp`]: () =>
+      jsonResponse({
+        ucp: {
+          version: '2026-04-08',
+          merchant: 'Headless Merchant',
+          description:
+            'A test merchant that exposes every agent checkout path.',
+          services: {
+            'dev.ucp.shopping': [
+              {
+                version: '2026-04-08',
+                transport: 'mcp',
+                endpoint: `${HEADLESS_ORIGIN}/api/ucp/mcp`,
+              },
+              {
+                version: '2026-04-08',
+                transport: 'rest',
+                endpoint: `${HEADLESS_ORIGIN}/api/ucp`,
+              },
+            ],
+          },
+          capabilities: {
+            'dev.ucp.shopping.checkout': [{ version: '2026-04-08' }],
+          },
+        },
+      }),
+    [HEADLESS_CHECKOUT]: () =>
+      htmlResponse(`<!doctype html>
+<html>
+  <body>
+    <h1>Checkout</h1>
+    <div class="AiAgentPaymentSteering">I am an AI agent</div>
+    <p>Agents can also run stripe provision headlessmerchant</p>
+  </body>
+</html>`),
+    [`${HEADLESS_ORIGIN}/.well-known/mcp.json`]: () =>
+      jsonResponse({
+        name: 'headless-mcp',
+        description: 'Official Headless Merchant MCP',
+        remotes: [{ url: `${HEADLESS_ORIGIN}/mcp` }],
+      }),
+    [`${HEADLESS_ORIGIN}/llms.txt`]: () =>
+      textResponse(`# Headless Merchant Docs
+
+> Agent-readable docs for Headless Merchant.
+
+## MCP
+
+- [Agents MCP](${HEADLESS_ORIGIN}/agents/mcp)
+
+Provision with \`stripe provision headlessmerchant\`.
+`),
+  };
+
+  return vi.fn(async (input: string | URL) => {
+    const url = input.toString();
+    const handler = routes[url];
+    return handler ? handler() : notFound();
+  }) as unknown as typeof fetch;
+}
+
+describe('inspect fake merchant', () => {
+  it('returns a Directory object populated from every probe path', async () => {
+    const fetchImpl = fakeHeadlessMerchant();
+
+    const result = await runInspect(HEADLESS_CHECKOUT, { fetchImpl });
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain('null');
+    expect(serialized).not.toMatch(/:\[\]/);
+    expect(result).not.toHaveProperty('profile_id');
+    expect(result).not.toHaveProperty('username');
+
+    expect(result).toEqual({
+      id: localDirectoryId(HEADLESS_ORIGIN),
+      display_name: 'Headless Merchant',
+      description: 'A test merchant that exposes every agent checkout path.',
+      url: HEADLESS_ORIGIN,
+      llms_txt: [`${HEADLESS_ORIGIN}/llms.txt`],
+      available_tools: {
+        machine_payments: [
+          {
+            command: `mppx '${HEADLESS_ORIGIN}/api/orders'`,
+            description: 'Pay with MPP to create an order (stripe)',
+            url: `${HEADLESS_ORIGIN}/api/orders`,
+          },
+        ],
+        mcp: [
+          {
+            command: `'${HEADLESS_ORIGIN}/api/ucp/mcp'`,
+            description: 'Use MCP for dev.ucp.shopping',
+            url: `${HEADLESS_ORIGIN}/api/ucp/mcp`,
+          },
+          {
+            command: `'${HEADLESS_ORIGIN}/mcp'`,
+            description: 'Official Headless Merchant MCP',
+            url: `${HEADLESS_ORIGIN}/mcp`,
+          },
+          {
+            command: `'${HEADLESS_ORIGIN}/agents/mcp'`,
+            description: 'Use MCP to Agents MCP',
+            url: `${HEADLESS_ORIGIN}/agents/mcp`,
+          },
+        ],
+        provisioning: [
+          {
+            command: "stripe provision 'headlessmerchant'",
+            description: 'Provision this service using the provisioning API',
+          },
+        ],
+        browser_checkout: {
+          merchant_advice:
+            'Merchant publishes a UCP profile — use the Universal Commerce Protocol for catalog, cart, and checkout. Checkout includes an AI-agent steering block. Create a card spend request and complete the Link Pay Token flow (enable "I am an AI agent" and inject the token from spend-request retrieve --include link_pay_token).',
+          general_advice:
+            'Create a Link spend request with the default card credential type, get it approved, then enter the returned card details into the site checkout form.',
+        },
+      },
+    });
+
+    const requested = (
+      fetchImpl as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.map(([input]) => input.toString());
+    expect(requested).toEqual(
+      expect.arrayContaining([
+        `${HEADLESS_ORIGIN}/api/openapi.json`,
+        `${HEADLESS_ORIGIN}/.well-known/x402.json`,
+        `${HEADLESS_ORIGIN}/.well-known/ucp`,
+        HEADLESS_CHECKOUT,
+        `${HEADLESS_ORIGIN}/.well-known/mcp.json`,
+        `${HEADLESS_ORIGIN}/llms.txt`,
+      ]),
+    );
+    // OpenAPI already declared stripe, so inspect must not live-probe /api/orders.
+    expect(requested).not.toContain(`${HEADLESS_ORIGIN}/api/orders`);
+  });
+});

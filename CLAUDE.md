@@ -56,7 +56,7 @@ Commands in `packages/cli/src/cli.tsx` (incur framework). Each has two output mo
 - **Interactive** (default): Ink/React components from `packages/cli/src/commands/`
 - **JSON** (`--format json`): JSON to stdout, errors as JSON with `code` and `message` fields with exit code 1
 
-Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `inspect <url>`, `report`, `serve`.
+Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `[beta] inspect <url>`, `report`, `serve`.
 
 The CLI also runs as an MCP server (`--mcp`) and serves skill files via `skills` subcommand, both provided by incur.
 
@@ -116,7 +116,7 @@ Key input field notes:
 
 ### inspect command
 
-- `inspect <url> [--timeout <ms>]` — no auth required. Probes a merchant site and returns a **Directory** object (the shape a future Directory API is expected to return). Parsing stays local — there is no backend Directory client yet. Implemented in `packages/cli/src/commands/inspect/` — `directory.ts` (typed Directory model + omit-empty helpers), `inspect.ts` (site probes mapped onto that model), `inspect-view.tsx` (interactive Ink view), `index.tsx` (incur registration), `schema.ts`.
+- `[beta] inspect <url> [--timeout <ms>]` — no auth required. Probes a merchant site and returns a **Directory** object (the shape a future Directory API is expected to return). Parsing stays local — there is no backend Directory client yet. Implemented in `packages/cli/src/commands/inspect/` — `directory.ts` (typed Directory model + omit-empty helpers), `inspect.ts` (site probes mapped onto that model), `inspect-view.tsx` (interactive Ink view), `index.tsx` (incur registration), `schema.ts`. The command description is prefixed with `[beta]` like `balances`, `sources`, and `transactions`.
 - Output always includes `id` and `url`. `id` is a locally synthesized `directory_<sha256(origin)>` placeholder until a backend assigns canonical ids. `url` is the origin of the inspected URL. Optional fields (`display_name`, `profile_id`, `username`, `description`, `llms_txt`, and each `available_tools` section) are **omitted when absent** — never `null` or empty placeholders. `profile_id` / `username` are not synthesized locally (those are Stripe-network identifiers).
 - Discovery, concurrently plus follow-up fetches:
   - **Identity / llms.txt:** `<origin>/llms.txt` and `/llms-full.txt`, plus `llms.txt` URLs found in page HTML. Title (`#`) and summary (`>`) populate `display_name` / `description` when present. Discovered file URLs go in `llms_txt`.
