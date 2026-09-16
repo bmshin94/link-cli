@@ -30,23 +30,20 @@ function getMissingBillingDetailsParam(error: LinkApiError): string | null {
   if (error.status !== 400) return null;
 
   const details = error.details as {
-    error?: { code?: unknown; param?: unknown };
+    error?: { code?: string; param?: string };
   };
-  const structuredParam = details?.error?.param;
+  const apiError = details?.error;
+  if (apiError?.code !== 'parameter_missing') return null;
+
+  const param = apiError.param;
   if (
-    typeof structuredParam === 'string' &&
-    (structuredParam === BILLING_DETAILS_PREFIX ||
-      structuredParam.startsWith(`${BILLING_DETAILS_PREFIX}[`)) &&
-    (details?.error?.code === 'parameter_missing' ||
-      /Missing required param:/i.test(error.message))
+    param === BILLING_DETAILS_PREFIX ||
+    param?.startsWith(`${BILLING_DETAILS_PREFIX}[`)
   ) {
-    return structuredParam;
+    return param;
   }
 
-  const match = error.message.match(
-    /Missing required param:\s*(payment_method\[billing_details\](?:\[[^\]]+\])+)/i,
-  );
-  return match?.[1] ?? null;
+  return null;
 }
 
 export function formatUcpCheckoutError(error: unknown): UcpCheckoutError {

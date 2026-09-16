@@ -36,15 +36,15 @@ describe('formatUcpCheckoutError', () => {
     expect(result.message).toContain('create a new spend request');
   });
 
-  it('extracts a missing billing parameter from the API message', () => {
-    const result = formatUcpCheckoutError(
-      apiError(
-        'Failed to complete UCP checkout (400): Missing required param: payment_method[billing_details][address][city].',
-      ),
+  it('leaves a message-only API error unchanged', () => {
+    const error = apiError(
+      'Failed to complete UCP checkout (400): Missing required param: payment_method[billing_details][address][city].',
     );
 
-    expect(result.missingBillingDetails).toBe(true);
-    expect(result.message).toContain('billing address city');
+    expect(formatUcpCheckoutError(error)).toEqual({
+      message: error.message,
+      missingBillingDetails: false,
+    });
   });
 
   it('uses a generic label for an unknown billing field', () => {
