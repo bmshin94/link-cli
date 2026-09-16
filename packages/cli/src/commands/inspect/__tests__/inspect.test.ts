@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { localDirectoryId } from '../directory';
-import { runInspect } from '../inspect';
+import {
+  type InspectResult,
+  compactInspectResult,
+  extractLlmsTxtUrls,
+  extractMarkdownMcpLinks,
+  extractProvisionSlugs,
+  parseLlmsTxtMeta,
+  parseMcpManifest,
+  quoteCommandArg,
+  runInspect,
+} from '../inspect';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -148,15 +157,15 @@ function stripeChallengeHeader(networkId: string): string {
 }
 
 describe('runInspect', () => {
-  it('returns a Directory object with locally synthesized id and required url', async () => {
+  it('returns the origin url and omits empty optional fields', async () => {
     const fetchImpl = vi.fn(async () => notFound());
 
     const result = await runInspect('https://shop.example.com/checkout', {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
-    expect(result.id).toBe(localDirectoryId('https://shop.example.com'));
     expect(result.url).toBe('https://shop.example.com');
+    expect(result).not.toHaveProperty('id');
     expect(result).not.toHaveProperty('profile_id');
     expect(result).not.toHaveProperty('username');
     expect(result).not.toHaveProperty('display_name');
@@ -554,7 +563,7 @@ Provision with \`stripe provision headlessmerchant\`.
 }
 
 describe('inspect fake merchant', () => {
-  it('returns a Directory object populated from every probe path', async () => {
+  it('returns tools populated from every probe path', async () => {
     const fetchImpl = fakeHeadlessMerchant();
 
     const result = await runInspect(HEADLESS_CHECKOUT, { fetchImpl });
@@ -566,7 +575,6 @@ describe('inspect fake merchant', () => {
     expect(result).not.toHaveProperty('username');
 
     expect(result).toEqual({
-      id: localDirectoryId(HEADLESS_ORIGIN),
       display_name: 'Headless Merchant',
       description: 'A test merchant that exposes every agent checkout path.',
       url: HEADLESS_ORIGIN,
@@ -626,5 +634,93 @@ describe('inspect fake merchant', () => {
     );
     // OpenAPI already declared stripe, so inspect must not live-probe /api/orders.
     expect(requested).not.toContain(`${HEADLESS_ORIGIN}/api/orders`);
+  });
+});
+
+describe('inspect helpers', () => {
+  it('omits null, empty, and blank optional fields', () => {
+    const compacted = compactInspectResult({
+      display_name: '',
+      description: 'A shop',
+      url: 'https://shop.example.com',
+      llms_txt: [],
+      available_tools: {
+        machine_payments: [],
+        mcp: undefined,
+        browser_checkout: {
+          merchant_advice: '',
+          general_advice: 'Pay in browser',
+        },
+      },
+    } as InspectResult);
+
+    expect(compacted).toEqual({
+      description: 'A shop',
+      url: 'https://shop.example.com',
+      available_tools: {
+        browser_checkout: { general_advice: 'Pay in browser' },
+      },
+    });
+    expect(JSON.stringify(compacted)).not.toContain('null');
+    expect(compacted).not.toHaveProperty('display_name');
+    expect(compacted).not.toHaveProperty('llms_txt');
+  });
+
+  it('parses llms.txt title and summary', () => {
+    expect(
+      parseLlmsTxtMeta('# Shop\n\n> Sells widgets\n\nDetails here.\n'),
+    ).toEqual({ title: 'Shop', summary: 'Sells widgets' });
+  });
+
+  it('parses MCP manifests from remotes, endpoints, and url fields', () => {
+    expect(
+      parseMcpManifest({
+        name: 'shop',
+        description: 'Shop MCP',
+        remotes: [{ url: 'https://shop.example.com/mcp' }],
+      }),
+    ).toEqual([
+      {
+        url: 'https://shop.example.com/mcp',
+        name: 'shop',
+        description: 'Shop MCP',
+      },
+    ]);
+    expect(
+      parseMcpManifest({
+        endpoints: { streamable_http: 'https://shop.example.com/sse' },
+      }),
+    ).toEqual([{ url: 'https://shop.example.com/sse' }]);
+  });
+
+  it('extracts stripe provision slugs from text', () => {
+    expect(
+      extractProvisionSlugs(
+        'Run stripe provision neon --yes or stripe projects add supabase/project.',
+      ),
+    ).toEqual(['neon', 'supabase/project']);
+  });
+
+  it('extracts llms.txt URLs relative to the origin', () => {
+    expect(
+      extractLlmsTxtUrls(
+        '<link rel="describedby" href="/docs/llms.txt">',
+        'https://shop.example.com',
+      ),
+    ).toContain('https://shop.example.com/docs/llms.txt');
+  });
+
+  it('extracts markdown MCP links', () => {
+    expect(
+      extractMarkdownMcpLinks(
+        '- [Shop MCP](https://shop.example.com/api/mcp)\n- [Docs](https://shop.example.com/docs)',
+      ),
+    ).toEqual([{ name: 'Shop MCP', url: 'https://shop.example.com/api/mcp' }]);
+  });
+
+  it('shell-quotes command arguments', () => {
+    expect(quoteCommandArg("https://shop.example.com/a'b")).toBe(
+      "'https://shop.example.com/a'\\''b'",
+    );
   });
 });

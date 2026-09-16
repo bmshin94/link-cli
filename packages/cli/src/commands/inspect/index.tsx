@@ -1,15 +1,14 @@
 import { Cli, z } from 'incur';
 import React from 'react';
 import { renderInteractive } from '../../utils/render-interactive';
-import type { Directory } from './directory';
-import { runInspect } from './inspect';
+import { type InspectResult, runInspect } from './inspect';
 import { InspectView } from './inspect-view';
 import { inspectOptions } from './schema';
 
 export function createInspectCli() {
   const cli = Cli.create('inspect', {
     description:
-      '[beta] Inspect a URL and return a Directory listing of available agent tools (machine payments, MCP, provisioning, browser checkout)',
+      '[beta] Inspect a URL and return available agent tools (machine payments, MCP, provisioning, browser checkout)',
     args: z.object({
       url: z.string().describe('URL to inspect'),
     }),
@@ -20,7 +19,7 @@ export function createInspectCli() {
       const timeoutMs = c.options.timeout;
 
       if (!c.agent && !c.formatExplicit) {
-        let capturedResult: Directory | null = null;
+        let capturedResult: InspectResult | null = null;
         return renderInteractive(
           <InspectView
             url={url}

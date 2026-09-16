@@ -116,16 +116,16 @@ Key input field notes:
 
 ### inspect command
 
-- `[beta] inspect <url> [--timeout <ms>]` — no auth required. Probes a merchant site and returns a **Directory** object (the shape a future Directory API is expected to return). Parsing stays local — there is no backend Directory client yet. Implemented in `packages/cli/src/commands/inspect/` — `directory.ts` (typed Directory model + omit-empty helpers), `inspect.ts` (site probes mapped onto that model), `inspect-view.tsx` (interactive Ink view), `index.tsx` (incur registration), `schema.ts`. The command description is prefixed with `[beta]` like `balances`, `sources`, and `transactions`.
-- Output always includes `id` and `url`. `id` is a locally synthesized `directory_<sha256(origin)>` placeholder until a backend assigns canonical ids. `url` is the origin of the inspected URL. Optional fields (`display_name`, `profile_id`, `username`, `description`, `llms_txt`, and each `available_tools` section) are **omitted when absent** — never `null` or empty placeholders. `profile_id` / `username` are not synthesized locally (those are Stripe-network identifiers).
+- `[beta] inspect <url> [--timeout <ms>]` — no auth required. Probes a merchant site and returns `url` plus any detected tools. Implemented in `packages/cli/src/commands/inspect/` — `inspect.ts` (probes + result shape), `inspect-view.tsx` (interactive Ink view), `index.tsx` (incur registration), `schema.ts`. The command description is prefixed with `[beta]` like `balances`, `sources`, and `transactions`.
+- Output always includes `url` (the origin of the inspected URL). Optional fields (`display_name`, `description`, `llms_txt`, and each `available_tools` section) are **omitted when absent** — never `null` or empty placeholders.
 - Discovery, concurrently plus follow-up fetches:
   - **Identity / llms.txt:** `<origin>/llms.txt` and `/llms-full.txt`, plus `llms.txt` URLs found in page HTML. Title (`#`) and summary (`>`) populate `display_name` / `description` when present. Discovered file URLs go in `llms_txt`.
-  - **UCP:** `<origin>/.well-known/ucp`. Merchant/description fill Directory identity; `transport: mcp` services become `available_tools.mcp`.
+  - **UCP:** `<origin>/.well-known/ucp`. Merchant/description fill `display_name` / `description`; `transport: mcp` services become `available_tools.mcp`.
   - **MPP / x402:** `<origin>/api/openapi.json` then `/openapi.json` (offer-aware, per https://mpp.dev/advanced/discovery), `<origin>/.well-known/x402.json`, and a live 402 probe when the spec doesn't already declare a `"stripe"` offer. Payment operations become `available_tools.machine_payments` (`command`: `mppx '<endpoint>'`, plus `description` and `url`).
   - **MCP:** `/.well-known/mcp.json`, `/.well-known/mcp`, `/.well-known/mcp-server-card`, UCP MCP transports, and MCP links in llms.txt.
   - **Provisioning:** `stripe provision <slug>` / `stripe projects add <slug>` mentions in page HTML or llms.txt become `available_tools.provisioning`.
   - **Browser checkout:** when the inspected URL returns HTML. `general_advice` describes the Link card flow; `merchant_advice` is added for UCP and/or a Link Pay Token steering block (`AiAgentPaymentSteering`, "I am an AI agent", `link_pay_token`).
-- `inspect` fetches arbitrary third-party HTML/JSON directly (no SDK resource) — `toDirectory()` runs `sanitizeDeep()` then `compactDirectory()` before JSON or interactive output sees the result.
+- `inspect` fetches arbitrary third-party HTML/JSON directly (no SDK resource) — `toInspectResult()` runs `sanitizeDeep()` then omits empty optional fields before JSON or interactive output sees the result.
 
 ### demo command
 
@@ -170,7 +170,7 @@ Server-returned strings can contain ANSI escape sequences or control characters 
 - **Commands using `useAsyncAction` hook** — sanitized automatically. The hook calls `sanitizeDeep()` on all returned data before it reaches components.
 - **Commands with manual state management** (e.g. `create.tsx`, `retrieve.tsx`, `request-approval.tsx`, `mpp/pay.tsx`) — must call `sanitizeDeep()` on API responses before calling `setRequest()`/`setState()`.
 - **Attacker-controlled data that does NOT flow through an SDK resource** — must be sanitized at its own parse boundary. `mpp pay` sanitizes the HTTP response in `readPayResult()` (`pay.tsx`); `mpp decode` sanitizes the parsed `WWW-Authenticate` challenge in `decodeStripeChallenge()` (`decode.ts`). These bypass the resource factory, so the return value of the parse/fetch helper is the chokepoint — sanitizing there covers both the interactive Ink render and the agent (toon/yaml/md) output at once.
-- `inspect` fetches arbitrary third-party HTML/JSON directly (no SDK resource in the loop) — `toDirectory()` in `inspect.ts` calls `sanitizeDeep()` then omits empty optional fields before either JSON or interactive output sees it.
+- `inspect` fetches arbitrary third-party HTML/JSON directly (no SDK resource in the loop) — `toInspectResult()` in `inspect.ts` calls `sanitizeDeep()` then omits empty optional fields before either JSON or interactive output sees it.
 
 JSON output mode (`--format json`) is **not** affected — `JSON.stringify` encodes escape sequences as Unicode literals.
 

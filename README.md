@@ -357,13 +357,13 @@ card SpendRequest instead; do not create an LPT request.
 
 ### Inspect a merchant site (beta)
 
-`inspect` is a beta command. Before creating a spend request, use it to discover how agents can engage the site. It returns a **Directory** object (the same shape a future Directory API is expected to return), built locally from site probes:
+`inspect` is a beta command. Before creating a spend request, use it to discover how agents can engage the site:
 
 ```bash
 link-cli inspect https://shop.example.com/checkout
 ```
 
-Required fields: `id`, `url`. Optional fields are omitted when unknown (`display_name`, `profile_id`, `username`, `description`, `llms_txt`, and each `available_tools` section). `id` is a locally synthesized `directory_...` placeholder until a backend exists.
+Required field: `url` (the origin of the inspected URL). Optional fields are omitted when unknown (`display_name`, `description`, `llms_txt`, and each `available_tools` section).
 
 It probes `llms.txt`, a [UCP](https://ucp.dev) profile at `/.well-known/ucp`, an [MPP](https://mpp.dev) OpenAPI spec at `/api/openapi.json` or `/openapi.json`, MCP well-known manifests, provisioning command mentions, and the page HTML for a Link Pay Token steering block. Matching capabilities are returned under `available_tools`:
 

@@ -3,13 +3,12 @@ import Spinner from 'ink-spinner';
 import type React from 'react';
 import { useCallback } from 'react';
 import { useAsyncAction } from '../../hooks/use-async-action';
-import type { Directory, DirectoryTool } from './directory';
-import { runInspect } from './inspect';
+import { type InspectResult, type InspectTool, runInspect } from './inspect';
 
 interface InspectViewProps {
   url: string;
   timeoutMs?: number;
-  onComplete: (result: Directory | null) => void;
+  onComplete: (result: InspectResult | null) => void;
 }
 
 function ToolList({
@@ -17,7 +16,7 @@ function ToolList({
   tools,
 }: {
   label: string;
-  tools: DirectoryTool[];
+  tools: InspectTool[];
 }) {
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -48,7 +47,7 @@ export const InspectView: React.FC<InspectViewProps> = ({
     [url, timeoutMs],
   );
   const handleComplete = useCallback(
-    (result: Directory | null) => {
+    (result: InspectResult | null) => {
       onComplete(result);
       exit();
     },
@@ -82,7 +81,7 @@ export const InspectView: React.FC<InspectViewProps> = ({
   return (
     <Box flexDirection="column">
       <Text>
-        Directory for <Text bold>{data.display_name ?? data.url}</Text>
+        Inspected <Text bold>{data.display_name ?? data.url}</Text>
       </Text>
       {data.display_name ? <Text dimColor>{data.url}</Text> : null}
       {data.description ? <Text>{data.description}</Text> : null}
