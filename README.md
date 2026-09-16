@@ -56,6 +56,12 @@ Install the skills:
 npx skills add stripe/link-cli
 ```
 
+To install only MPP service discovery:
+
+```bash
+npx skills add stripe/link-cli --skill discover-mpp-services
+```
+
 By default when called from an agent (non-TTY), all commands use `toon` output — a compact, LLM-friendly text format. All commands accept `--format [format]` for structured output. Other formats: `json`, `yaml`, `md`, `jsonl`.
 
 List available commands:
