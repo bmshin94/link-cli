@@ -8,7 +8,7 @@ import Spinner from 'ink-spinner';
 import { Challenge, Credential, Expires, Method } from 'mppx';
 import { Mppx } from 'mppx/client';
 import { Methods as StripeMethods } from 'mppx/stripe';
-import { Methods as TempoMethods } from 'mppx/tempo';
+import { Methods as TempoMethods, Proof as TempoProof } from 'mppx/tempo';
 import { useEffect, useState } from 'react';
 import { isAddress } from 'viem';
 import { pollUntilApproved } from '../../utils/poll-until-approved';
@@ -242,6 +242,20 @@ export function buildSignedTransactionCredential(
   const { challenge, request } = resolveTempoChallenge(
     spendRequest.payment_challenge,
   );
+  const source = (transaction as { source?: unknown }).source;
+  if (source !== undefined) {
+    if (typeof source !== 'string') {
+      throw new Error(
+        'Spend request signed_transaction.source must be a Tempo payer DID.',
+      );
+    }
+    const payer = TempoProof.parseProofSource(source);
+    if (!payer || payer.chainId !== request.chainId) {
+      throw new Error(
+        'Spend request signed_transaction.source must identify the challenged Tempo chain.',
+      );
+    }
+  }
   const expectedPrefix = request.feePayer ? '78' : '76';
   if (
     !new RegExp(`^0x${expectedPrefix}[0-9a-f]+$`, 'i').test(
@@ -259,6 +273,7 @@ export function buildSignedTransactionCredential(
   return Credential.serialize({
     challenge,
     payload: { signature: transaction.tx_hash, type: 'transaction' },
+    ...(source ? { source } : {}),
   });
 }
 

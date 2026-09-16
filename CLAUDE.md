@@ -56,7 +56,7 @@ Commands in `packages/cli/src/cli.tsx` (incur framework). Each has two output mo
 - **Interactive** (default): Ink/React components from `packages/cli/src/commands/`
 - **JSON** (`--format json`): JSON to stdout, errors as JSON with `code` and `message` fields with exit code 1
 
-Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `report`, `serve`.
+Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode|sign-in-with-x`, `report`, `serve`.
 
 The CLI also runs as an MCP server (`--mcp`) and serves skill files via `skills` subcommand, both provided by incur.
 
@@ -113,6 +113,13 @@ Key input field notes:
 - The SPT is one-time-use — a failed payment requires running `mpp pay` again (creates a new spend request).
 - In agent mode the full flow yields `_next.pay_argv` (`{ command: 'mpp', args: [...] }`) alongside `_next.pay_command`. **`pay_argv` is authoritative** — it holds the raw values and is meant to be invoked without a shell. `pay_command` is the compatibility string and every dynamic part of it (url, method, body, each header, spend-request id) must go through `shellQuote` from `packages/cli/src/utils/shell-quote.ts`. See "Security: shell-quoting command strings".
 - Implemented in `packages/cli/src/commands/mpp/` — pay.tsx (logic), schema.ts (input/output schema), index.tsx (incur registration).
+
+### mpp sign-in-with-x
+
+- `mpp sign-in-with-x <url> [-X <method>] [-d <body>] [-H <header>]...` — fetches a fresh x402 v2 `sign-in-with-x` extension challenge, asks the credential resource to sign it, and retries once with `SIGN-IN-WITH-X`. This authenticates access to a wallet-owned resource after payment; it does not submit an MPP payment credential.
+- The PoC is available only with `LINK_MPP_LOCAL_PRIVY=1` and requires `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and `PRIVY_WALLET_ID`. The CLI passes the structured challenge through `ISignInWithXCredentialResource`; the local implementation uses Privy EIP-191 signing, while a production implementation belongs behind the Link Wallet backend boundary.
+- The challenge URI must exactly equal the requested URL. Both requests use `redirect: manual`; redirects are rejected so the signature cannot be moved to another destination. Callers cannot provide `SIGN-IN-WITH-X` manually.
+- Implemented in `packages/cli/src/commands/mpp/` — sign-in-with-x.ts (challenge/retry logic), local-sign-in-with-x.ts (Privy signer), schema.ts (options), index.tsx (registration).
 
 ### demo command
 

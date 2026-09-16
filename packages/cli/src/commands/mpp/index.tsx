@@ -9,6 +9,7 @@ import { requireAuth } from '../../utils/require-auth';
 import { shellCommand, shellQuote } from '../../utils/shell-quote';
 import { decodeStripeChallenge } from './decode';
 import { DecodeChallengeView } from './decode-view';
+import { LocalPrivySignInWithXResource } from './local-sign-in-with-x';
 import {
   isLocalPrivyMode,
   LocalSignedTransactionResource,
@@ -25,7 +26,8 @@ import {
   runMppPayWithSpendRequest,
 } from './pay';
 import { createMppRequest } from './request';
-import { decodeOptions, payOptions } from './schema';
+import { decodeOptions, payOptions, signInWithXOptions } from './schema';
+import { runSignInWithX } from './sign-in-with-x';
 
 export function createMppCli(
   repository: ISpendRequestResource,
@@ -290,6 +292,34 @@ export function createMppCli(
       }
 
       return decoded;
+    },
+  });
+
+  cli.command('sign-in-with-x', {
+    description:
+      'Satisfy an x402 Sign-In-With-X challenge using the wallet that paid for an MPP-enabled resource.',
+    args: z.object({
+      url: z.string().describe('URL requiring SIWX authentication'),
+    }),
+    options: signInWithXOptions,
+    alias: { method: 'X', data: 'd', header: 'H' },
+    outputPolicy: 'agent-only' as const,
+    middleware: [requireAuth(authStorage, envAccessToken)],
+    async run(c) {
+      if (!localMode) {
+        return c.error({
+          code: 'NOT_SUPPORTED',
+          message:
+            'The Link Wallet backend does not yet expose Sign-In-With-X credentials. Set LINK_MPP_LOCAL_PRIVY=1 to use the local Privy PoC.',
+        });
+      }
+      return runSignInWithX({
+        url: c.args.url,
+        method: c.options.method,
+        data: c.options.data,
+        headers: c.options.header?.length ? c.options.header : undefined,
+        credentialResource: new LocalPrivySignInWithXResource(),
+      });
     },
   });
 

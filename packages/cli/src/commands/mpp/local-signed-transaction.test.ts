@@ -97,7 +97,10 @@ describe('sponsored Tempo signing', () => {
 describe('LocalSignedTransactionResource', () => {
   it('auto-approves and stores a locally signed transaction', async () => {
     const link = linkResource();
-    const sign = vi.fn(async () => '0x76aabbcc');
+    const sign = vi.fn(async () => ({
+      source: 'did:pkh:eip155:4217:0xa2128C4C18e47778AE9Fa98E10cf76304f228e7c',
+      txHash: '0x76aabbcc',
+    }));
     const resource = new LocalSignedTransactionResource(link, sign);
 
     const created = await resource.create({
@@ -113,7 +116,11 @@ describe('LocalSignedTransactionResource', () => {
       status: 'approved',
       credential_type: 'signed_transaction',
       payment_challenge: 'Payment id="tempo_001"',
-      signed_transaction: { tx_hash: '0x76aabbcc' },
+      signed_transaction: {
+        source:
+          'did:pkh:eip155:4217:0xa2128C4C18e47778AE9Fa98E10cf76304f228e7c',
+        tx_hash: '0x76aabbcc',
+      },
     });
     expect(created.id).toMatch(/^local_lsrq_/);
     await expect(resource.retrieve(created.id)).resolves.toEqual(created);

@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@privy-io/node": "^0.31.0",
+    "@x402/extensions": "2.25.0",
     "conf": "^15.1.0",
     "incur": "^0.5.1",
     "ink": "^7.1.1",

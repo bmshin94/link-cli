@@ -23,7 +23,12 @@ export interface LocalPrivyEnvironment {
 
 export type SignedTransactionFactory = (
   paymentChallenge: string,
-) => Promise<string>;
+) => Promise<string | SignedTempoTransaction>;
+
+export interface SignedTempoTransaction {
+  source: string;
+  txHash: string;
+}
 
 type TempoTransactionSerializer = (
   transaction: unknown,
@@ -68,10 +73,9 @@ export function getPrivyConfig(env: LocalPrivyEnvironment = process.env) {
   };
 }
 
-export async function signTempoTransactionWithPrivy(
-  paymentChallenge: string,
+export async function createLocalPrivyEthereumAccount(
   env: LocalPrivyEnvironment = process.env,
-): Promise<string> {
+) {
   const config = getPrivyConfig(env);
   const privy = new PrivyClient({
     appId: config.appId,
@@ -82,10 +86,25 @@ export async function signTempoTransactionWithPrivy(
     throw new Error('PRIVY_WALLET_ID must identify a valid Ethereum wallet.');
   }
 
-  const privyAccount = createViemAccount(privy, {
-    walletId: wallet.id,
-    address: wallet.address,
-  });
+  return {
+    account: createViemAccount(privy, {
+      walletId: wallet.id,
+      address: wallet.address,
+    }),
+    privy,
+    wallet,
+  };
+}
+
+async function createTempoTransactionCredentialWithPrivy(
+  paymentChallenge: string,
+  env: LocalPrivyEnvironment = process.env,
+): Promise<SignedTempoTransaction> {
+  const {
+    account: privyAccount,
+    privy,
+    wallet,
+  } = await createLocalPrivyEthereumAccount(env);
   const defaultSignTransaction =
     privyAccount.signTransaction.bind(privyAccount);
   const account = {
@@ -139,7 +158,19 @@ export async function signTempoTransactionWithPrivy(
   ) {
     throw new Error('Privy did not return a serialized Tempo transaction.');
   }
-  return signature;
+  if (!credential.source) {
+    throw new Error('Privy Tempo credential did not include a payer source.');
+  }
+  return { source: credential.source, txHash: signature };
+}
+
+export async function signTempoTransactionWithPrivy(
+  paymentChallenge: string,
+  env: LocalPrivyEnvironment = process.env,
+): Promise<string> {
+  return (
+    await createTempoTransactionCredentialWithPrivy(paymentChallenge, env)
+  ).txHash;
 }
 
 /**
@@ -151,7 +182,7 @@ export class LocalSignedTransactionResource implements ISpendRequestResource {
 
   constructor(
     private readonly link: ISpendRequestResource,
-    private readonly signTransaction: SignedTransactionFactory = signTempoTransactionWithPrivy,
+    private readonly signTransaction: SignedTransactionFactory = createTempoTransactionCredentialWithPrivy,
   ) {}
 
   async create(params: CreateSpendRequestParams): Promise<SpendRequest> {
@@ -166,13 +197,18 @@ export class LocalSignedTransactionResource implements ISpendRequestResource {
 
     const now = new Date().toISOString();
     const id = `local_lsrq_${randomUUID()}`;
-    const txHash = await this.signTransaction(params.payment_challenge);
+    const signed = await this.signTransaction(params.payment_challenge);
+    const txHash = typeof signed === 'string' ? signed : signed.txHash;
+    const source = typeof signed === 'string' ? undefined : signed.source;
     const request: SpendRequest = {
       id,
       status: 'approved',
       credential_type: 'signed_transaction',
       payment_challenge: params.payment_challenge,
-      signed_transaction: { tx_hash: txHash },
+      signed_transaction: {
+        tx_hash: txHash,
+        ...(source ? { source } : {}),
+      },
       context: params.context,
       created_at: now,
       updated_at: now,

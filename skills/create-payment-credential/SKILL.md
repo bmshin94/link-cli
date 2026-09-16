@@ -222,6 +222,18 @@ The amount and currency are derived from the 402 challenge automatically. Pass `
 
 The SPT is **one-time use** — if the payment fails, run `mpp pay` again (it will create a new spend request).
 
+If the paid service returns an asynchronous resource that later answers with an
+x402 `sign-in-with-x` challenge, authenticate the wallet-owned resource with:
+
+```bash
+link-cli mpp sign-in-with-x <url> [-X GET] [-d '<body>'] [-H 'Name: Value']
+```
+
+This is an authentication step, not another payment. The command gets a fresh
+challenge and retries once with `SIGN-IN-WITH-X`. The current PoC requires
+`LINK_MPP_LOCAL_PRIVY=1` plus `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and
+`PRIVY_WALLET_ID`; the Link Wallet backend does not yet expose SIWX credentials.
+
 **Pre-approved spend request:** If you already have an approved spend request with `credential_type: "shared_payment_token"`, pass `--spend-request-id <id>` to skip the creation/approval steps:
 
 ```bash

@@ -60,6 +60,8 @@ const TOKEN = '0x20C000000000000000000000b9537d11c60E8b50';
 const RECIPIENT = '0x7b9cae3c6f339d864c7c4ceeec9703c864a68c9b';
 const SIGNED_TRANSACTION = '0x76aabbcc';
 const SPONSORED_TRANSACTION = '0x78aabbcc';
+const TEMPO_SOURCE =
+  'did:pkh:eip155:4217:0xa2128C4C18e47778AE9Fa98E10cf76304f228e7c';
 
 function tempoChallenge(
   overrides: Record<string, unknown> = {},
@@ -572,7 +574,7 @@ function signedSpendRequest() {
     status: 'approved',
     credential_type: 'signed_transaction',
     payment_challenge: tempoChallenge(),
-    signed_transaction: { tx_hash: SIGNED_TRANSACTION },
+    signed_transaction: { source: TEMPO_SOURCE, tx_hash: SIGNED_TRANSACTION },
     created_at: '2026-09-01T00:00:00Z',
     updated_at: '2026-09-01T00:00:00Z',
   } as const;
@@ -588,7 +590,10 @@ function sponsoredSpendRequest() {
         supportedModes: ['pull'],
       },
     }),
-    signed_transaction: { tx_hash: SPONSORED_TRANSACTION },
+    signed_transaction: {
+      source: TEMPO_SOURCE,
+      tx_hash: SPONSORED_TRANSACTION,
+    },
   } as const;
 }
 
@@ -601,6 +606,7 @@ describe('signed transaction payment', () => {
     );
 
     expect(decoded.challenge.id).toBe('tempo_001');
+    expect(decoded.source).toBe(TEMPO_SOURCE);
     expect(decoded.payload).toEqual({
       signature: SIGNED_TRANSACTION,
       type: 'transaction',

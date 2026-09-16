@@ -310,6 +310,21 @@ link-cli mpp pay https://climate.stripe.dev/api/contribute \
   --header "X-Custom: value"
 ```
 
+Some x402 services require wallet authentication after payment, for example to
+poll an asynchronous job created by that wallet. In the local Privy PoC, use
+`mpp sign-in-with-x` to fetch a fresh SIWX challenge, sign its EIP-191 message,
+and retry the same request with `SIGN-IN-WITH-X`:
+
+```bash
+LINK_MPP_LOCAL_PRIVY=1 link-cli mpp sign-in-with-x \
+  https://stablestudio.dev/api/jobs/job_123
+```
+
+This command authenticates an existing wallet-owned resource; it does not make
+an MPP payment. It currently requires `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and
+`PRIVY_WALLET_ID` because the Link Wallet backend does not yet expose SIWX
+credentials.
+
 ### Link Pay Token
 
 Some Stripe checkout pages expose an AI-agent steering block that supports a
