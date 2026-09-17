@@ -2747,6 +2747,21 @@ describe('production mode', () => {
       'expires="2099-01-01T00:00:00Z"',
     ].join(' ');
 
+    const WWW_AUTHENTICATE_TEMPO_PROOF = [
+      'Payment id="tempo_proof_001",',
+      'realm="127.0.0.1",',
+      'method="tempo",',
+      'intent="charge",',
+      `request="${Buffer.from(
+        JSON.stringify({
+          amount: '0',
+          currency: '0x20C000000000000000000000b9537d11c60E8b50',
+          methodDetails: { chainId: 4217 },
+        }),
+      ).toString('base64url')}",`,
+      'expires="2099-01-01T00:00:00Z"',
+    ].join(' ');
+
     function decodeCredential(authorizationHeader: string): {
       challenge: { intent: string };
       payload: Record<string, unknown>;
@@ -2824,6 +2839,44 @@ describe('production mode', () => {
       expect(output[0]._next.pay_argv.command).toBe('mpp');
       expect(output[0]._next.pay_argv.args).toContain('lsrq_tempo_001');
       expect(merchantRequests).toHaveLength(1);
+    });
+
+    it('does not create a spend request for a zero-dollar Tempo challenge', async () => {
+      setMerchantResponse(402, '{"error":"authentication required"}', {
+        'www-authenticate': WWW_AUTHENTICATE_TEMPO_PROOF,
+      });
+
+      const result = await runProdCli(
+        'mpp',
+        'pay',
+        `http://127.0.0.1:${merchantPort}/api/jobs/123`,
+        '--format',
+        'json',
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout + result.stderr).toContain(
+        'does not yet expose MPP proof credentials',
+      );
+      expect(requests).toHaveLength(0);
+      expect(merchantRequests).toHaveLength(1);
+    });
+
+    it('exposes mpp proof as a high-level command', async () => {
+      const result = await runProdCli(
+        'mpp',
+        'proof',
+        `http://127.0.0.1:${merchantPort}/api/jobs/123`,
+        '--format',
+        'json',
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout + result.stderr).toContain(
+        'does not yet expose MPP proof credentials',
+      );
+      expect(requests).toHaveLength(0);
+      expect(merchantRequests).toHaveLength(0);
     });
 
     it('submits an approved Link-signed Tempo transaction', async () => {

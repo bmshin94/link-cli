@@ -9,6 +9,7 @@ import { requireAuth } from '../../utils/require-auth';
 import { shellCommand, shellQuote } from '../../utils/shell-quote';
 import { decodeStripeChallenge } from './decode';
 import { DecodeChallengeView } from './decode-view';
+import { LocalPrivyMppProofSigner } from './local-mpp-proof';
 import { LocalPrivySignInWithXResource } from './local-sign-in-with-x';
 import {
   isLocalPrivyMode,
@@ -18,15 +19,24 @@ import {
   assertTempoCompatibleOptions,
   buildHeaders,
   hasStripeChallenge,
+  type IMppProofSigner,
+  isTempoProofChallenge,
   MppPay,
   type PayResult,
   probeMppRequest,
   readPayResult,
   resolveTempoChallenge,
   runMppPayWithSpendRequest,
+  runMppProof,
+  submitMppProof,
 } from './pay';
 import { createMppRequest } from './request';
-import { decodeOptions, payOptions, signInWithXOptions } from './schema';
+import {
+  decodeOptions,
+  payOptions,
+  proofOptions,
+  signInWithXOptions,
+} from './schema';
 import { runSignInWithX } from './sign-in-with-x';
 
 export function createMppCli(
@@ -34,8 +44,12 @@ export function createMppCli(
   paymentMethodsFactory: () => IPaymentMethodsResource,
   authStorage?: CliAuthStorage,
   envAccessToken?: string,
+  proofSignerOverride?: IMppProofSigner,
 ) {
   const localMode = isLocalPrivyMode();
+  const proofSigner =
+    proofSignerOverride ??
+    (localMode ? new LocalPrivyMppProofSigner() : undefined);
   const paymentRepository = localMode
     ? new LocalSignedTransactionResource(repository)
     : repository;
@@ -45,7 +59,7 @@ export function createMppCli(
 
   cli.command('pay', {
     description:
-      'Pay a URL via MPP. Creates a Link spend request and fulfills Stripe challenges with an SPT or Tempo challenges with a signed transaction.',
+      'Fulfill an MPP challenge. Paid challenges use a Link spend request; zero-dollar Tempo challenges use a wallet proof without creating one.',
     args: z.object({
       url: z.string().describe('URL to pay'),
     }),
@@ -75,6 +89,7 @@ export function createMppCli(
             test={opts.test}
             repository={paymentRepository}
             paymentMethodsFactory={paymentMethodsFactory}
+            proofSigner={proofSigner}
             onComplete={(result) => {
               capturedResult = result;
             }}
@@ -124,20 +139,34 @@ export function createMppCli(
       }
 
       if (!hasStripeChallenge(wwwAuth)) {
+        assertTempoCompatibleOptions({
+          amountOverride: opts.amount,
+          paymentMethodId: opts.paymentMethodId,
+          test: opts.test,
+        });
+        const tempoChallenge = resolveTempoChallenge(wwwAuth);
+
+        if (isTempoProofChallenge(tempoChallenge)) {
+          if (!proofSigner) {
+            await probeResponse.body?.cancel();
+            return c.error({
+              code: 'NOT_SUPPORTED',
+              message:
+                'The Link Wallet backend does not yet expose MPP proof credentials. Set LINK_MPP_LOCAL_PRIVY=1 to use the local Privy PoC.',
+            });
+          }
+          yield await submitMppProof(probe, proofSigner);
+          return;
+        }
+
         if (!opts.context) {
+          await probeResponse.body?.cancel();
           return c.error({
             code: 'INVALID_INPUT',
             message:
               '--context is required for Tempo payments (min 100 chars). Describe the purchase and rationale.',
           });
         }
-
-        assertTempoCompatibleOptions({
-          amountOverride: opts.amount,
-          paymentMethodId: opts.paymentMethodId,
-          test: opts.test,
-        });
-        resolveTempoChallenge(wwwAuth);
 
         const spendRequest = await paymentRepository.create({
           credential_type: 'signed_transaction',
@@ -273,6 +302,34 @@ export function createMppCli(
           until: 'status changes from pending_approval, then run pay_argv',
         },
       };
+    },
+  });
+
+  cli.command('proof', {
+    description:
+      'Satisfy a zero-dollar Tempo MPP identity challenge using the Link wallet, without creating a spend request.',
+    args: z.object({
+      url: z.string().describe('URL requiring zero-dollar MPP authentication'),
+    }),
+    options: proofOptions,
+    alias: { method: 'X', data: 'd', header: 'H' },
+    outputPolicy: 'agent-only' as const,
+    middleware: [requireAuth(authStorage, envAccessToken)],
+    async run(c) {
+      if (!proofSigner) {
+        return c.error({
+          code: 'NOT_SUPPORTED',
+          message:
+            'The Link Wallet backend does not yet expose MPP proof credentials. Set LINK_MPP_LOCAL_PRIVY=1 to use the local Privy PoC.',
+        });
+      }
+      return runMppProof({
+        url: c.args.url,
+        method: c.options.method,
+        data: c.options.data,
+        headers: c.options.header?.length ? c.options.header : undefined,
+        signer: proofSigner,
+      });
     },
   });
 

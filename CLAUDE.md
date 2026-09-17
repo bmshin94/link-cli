@@ -56,7 +56,7 @@ Commands in `packages/cli/src/cli.tsx` (incur framework). Each has two output mo
 - **Interactive** (default): Ink/React components from `packages/cli/src/commands/`
 - **JSON** (`--format json`): JSON to stdout, errors as JSON with `code` and `message` fields with exit code 1
 
-Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode|sign-in-with-x`, `report`, `serve`.
+Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|proof|decode|sign-in-with-x`, `report`, `serve`.
 
 The CLI also runs as an MCP server (`--mcp`) and serves skill files via `skills` subcommand, both provided by incur.
 
@@ -107,12 +107,21 @@ Key input field notes:
 
 ### mpp pay
 
-- `mpp pay <url> --context <ctx> [-X <method>] [-d <body>] [-H <header>]... [--amount <cents>] [--payment-method-id <id>] [--test]` — handles the full MPP flow end-to-end: probes the URL for a 402 challenge, parses the `www-authenticate` header to extract network_id and amount, creates a spend request (credential_type: shared_payment_token), gets user approval, retrieves the SPT, and pays. Amount/currency are derived from the 402 challenge; `--amount` overrides. `--context` is required (min 100 chars) — describe the purchase and rationale. Default payment method is used unless `--payment-method-id` is specified.
+- `mpp pay <url> --context <ctx> [-X <method>] [-d <body>] [-H <header>]... [--amount <cents>] [--payment-method-id <id>] [--test]` — handles the full MPP flow end-to-end: probes the URL for a 402 challenge, parses the `www-authenticate` header to extract network_id and amount, creates a spend request (credential_type: shared_payment_token), gets user approval, retrieves the SPT, and pays. Amount/currency are derived from the 402 challenge; `--amount` overrides. `--context` is required for paid flows (min 100 chars) — describe the purchase and rationale. Default payment method is used unless `--payment-method-id` is specified.
+- A zero-dollar Tempo `charge` challenge is an identity proof, not a spend. `mpp pay` delegates it to the same path as `mpp proof`: it signs and retries immediately without requiring `--context`, selecting a payment method, or creating a spend request.
 - `mpp pay <url> --spend-request-id <id> [--method <method>] [--data <body>] [--header <header>]...` — backward-compat mode: uses a pre-approved spend request directly, skipping creation/approval.
 - `--header` is repeatable and uses `"Name: Value"` format. `Content-Type: application/json` is auto-applied when `--data` is provided; user-provided headers take precedence.
 - The SPT is one-time-use — a failed payment requires running `mpp pay` again (creates a new spend request).
 - In agent mode the full flow yields `_next.pay_argv` (`{ command: 'mpp', args: [...] }`) alongside `_next.pay_command`. **`pay_argv` is authoritative** — it holds the raw values and is meant to be invoked without a shell. `pay_command` is the compatibility string and every dynamic part of it (url, method, body, each header, spend-request id) must go through `shellQuote` from `packages/cli/src/utils/shell-quote.ts`. See "Security: shell-quoting command strings".
 - Implemented in `packages/cli/src/commands/mpp/` — pay.tsx (logic), schema.ts (input/output schema), index.tsx (incur registration).
+
+### mpp proof
+
+- `mpp proof <url> [-X <method>] [-d <body>] [-H <header>]...` — fetches a Tempo MPP `charge` challenge, requires its amount to be exactly `"0"`, signs the canonical wallet-bound EIP-712 proof, and retries with a `Payment` Credential whose payload type is `proof`. It returns the resource response and does not emit the raw credential as command output.
+- Proof authentication does not use `ISpendRequestResource`, select a payment method, require payment context, or create/broadcast a transaction. The signer boundary is `IMppProofSigner.signMppProof`, which receives only the parsed challenge and validated Tempo chain ID.
+- The local PoC is enabled by `LINK_MPP_LOCAL_PRIVY=1` and uses the same `PRIVY_WALLET_ID` as paid Tempo and SIWX flows. A production signer belongs behind the Link Wallet backend boundary. Never replace the narrow signer with arbitrary caller-supplied EIP-712 typed data.
+- Initial redirects are resolved before signing; the credential retry uses `redirect: manual` and rejects redirects. The challenge expiration and supported Tempo chain are validated before the wallet signs.
+- Implemented in `packages/cli/src/commands/mpp/` — pay.tsx (proof challenge/retry logic), local-mpp-proof.ts (Privy EIP-712 signer), schema.ts (options), index.tsx (registration).
 
 ### mpp sign-in-with-x
 

@@ -47,8 +47,19 @@ export interface ResolvedTempoChallenge {
   challenge: Challenge.Challenge;
   request: TempoChargeRequest & {
     chainId: number;
-    recipient: string;
   };
+}
+
+export interface MppProof {
+  signature: string;
+  source: string;
+}
+
+export interface IMppProofSigner {
+  signMppProof(parameters: {
+    challenge: Challenge.Challenge;
+    chainId: number;
+  }): Promise<MppProof>;
 }
 
 declare const __CLI_VERSION__: string;
@@ -175,26 +186,38 @@ export function resolveTempoChallenge(
       `Unsupported Tempo chain ID '${request.chainId ?? 'missing'}'. Expected 4217 or 42431.`,
     );
   }
-  if (BigInt(request.amount) <= 0n) {
-    throw new Error('Tempo charge amount must be greater than zero.');
-  }
   if (!isAddress(request.currency)) {
     throw new Error('Tempo charge currency must be a valid token address.');
   }
-  if (!request.recipient || !isAddress(request.recipient)) {
+  if (request.recipient && !isAddress(request.recipient)) {
     throw new Error('Tempo charge recipient must be a valid address.');
   }
-  if (request.splits?.length) {
-    throw new Error('Tempo split payments are not supported by this PoC.');
-  }
-  if (request.supportedModes && !request.supportedModes.includes('pull')) {
-    throw new Error('Tempo challenge does not support pull mode.');
+
+  // A zero-amount charge is an identity proof, not a transaction. Recipient,
+  // split-payment, and transaction-mode restrictions do not apply because no
+  // funds move. Non-zero charges retain the PoC's pull-transaction limits.
+  if (BigInt(request.amount) > 0n) {
+    if (!request.recipient) {
+      throw new Error('Tempo charge recipient must be a valid address.');
+    }
+    if (request.splits?.length) {
+      throw new Error('Tempo split payments are not supported by this PoC.');
+    }
+    if (request.supportedModes && !request.supportedModes.includes('pull')) {
+      throw new Error('Tempo challenge does not support pull mode.');
+    }
   }
 
   return {
     challenge,
     request: request as ResolvedTempoChallenge['request'],
   };
+}
+
+export function isTempoProofChallenge(
+  resolved: ResolvedTempoChallenge,
+): boolean {
+  return BigInt(resolved.request.amount) === 0n;
 }
 
 export function hasStripeChallenge(challengeHeader: string): boolean {
@@ -378,17 +401,121 @@ export async function probeMppRequest(
   };
 }
 
+function createTempoProofClient(signer: IMppProofSigner, chainId: number) {
+  const tempoProof = Method.toClient(TempoMethods.charge, {
+    async createCredential({ challenge }) {
+      const proof = await signer.signMppProof({ challenge, chainId });
+      const source = TempoProof.parseProofSource(proof.source);
+      if (!source || source.chainId !== chainId) {
+        throw new Error(
+          'MPP proof source must identify the challenged Tempo chain.',
+        );
+      }
+      if (!/^0x[0-9a-f]+$/i.test(proof.signature)) {
+        throw new Error('MPP proof signer returned an invalid hex signature.');
+      }
+      return Credential.serialize({
+        challenge,
+        payload: { signature: proof.signature, type: 'proof' },
+        source: proof.source,
+      });
+    },
+  });
+
+  return Mppx.create({ methods: [tempoProof], polyfill: false });
+}
+
+export interface MppProofOptions {
+  url: string;
+  method?: string;
+  data?: string;
+  headers?: string[];
+  signer: IMppProofSigner;
+  fetcher?: typeof fetch;
+}
+
+export async function submitMppProof(
+  probe: MppProbe,
+  signer: IMppProofSigner,
+  fetcher: typeof fetch = fetch,
+): Promise<PayResult> {
+  const challengeHeader = probe.response.headers.get('www-authenticate');
+  if (!challengeHeader) {
+    await probe.response.body?.cancel();
+    throw new Error('URL returned 402 but no WWW-Authenticate header');
+  }
+  await probe.response.body?.cancel();
+
+  const resolved = resolveTempoChallenge(challengeHeader);
+  if (!isTempoProofChallenge(resolved)) {
+    throw new Error(
+      'MPP proof requires a zero-dollar Tempo charge challenge (amount: "0").',
+    );
+  }
+
+  const credentialResponse = new Response(null, {
+    status: probe.response.status,
+    statusText: probe.response.statusText,
+    headers: probe.response.headers,
+  });
+  const payment = await createTempoProofClient(
+    signer,
+    resolved.request.chainId,
+  ).preparePayment(credentialResponse);
+  if (payment.challenge.id !== resolved.challenge.id) {
+    throw new Error('MPP proof signer selected an unexpected challenge.');
+  }
+  const credential = await payment.createCredential();
+
+  const response = await fetcher(probe.url, {
+    ...payment.setCredential(
+      {
+        method: probe.method,
+        headers: probe.headers,
+        body: probe.body,
+      },
+      credential,
+    ),
+    redirect: 'manual',
+  });
+  if (isRedirectResponse(response)) {
+    await response.body?.cancel();
+    throw new Error(
+      `Authenticated MPP request returned redirect ${response.status}; refusing to forward the proof credential`,
+    );
+  }
+  return readPayResult(response);
+}
+
+export async function runMppProof({
+  url,
+  method,
+  data,
+  headers,
+  signer,
+  fetcher = fetch,
+}: MppProofOptions): Promise<PayResult> {
+  const httpMethod = method ?? (data !== undefined ? 'POST' : 'GET');
+  const probe = await probeMppRequest(
+    createMppRequest(url, httpMethod, data, buildHeaders(data, headers)),
+    fetcher,
+  );
+  if (probe.response.status !== 402) return readPayResult(probe.response);
+  return submitMppProof(probe, signer, fetcher);
+}
+
 export interface MppPayFullFlowOptions {
   url: string;
   method: string | undefined;
   data: string | undefined;
   headers: string[] | undefined;
-  context: string;
+  context: string | undefined;
   amountOverride: number | undefined;
   paymentMethodId: string | undefined;
   test: boolean;
   repository: ISpendRequestResource;
   paymentMethodsFactory: () => IPaymentMethodsResource;
+  proofSigner?: IMppProofSigner;
   onStep?: (step: Step) => void;
   onApprovalUrl?: (url: string) => void;
 }
@@ -555,6 +682,7 @@ export async function runMppPayFullFlow(
     test,
     repository,
     paymentMethodsFactory,
+    proofSigner,
     onStep,
     onApprovalUrl,
   } = opts;
@@ -581,7 +709,25 @@ export async function runMppPayFullFlow(
 
   if (!hasStripeChallenge(wwwAuth)) {
     assertTempoCompatibleOptions({ amountOverride, paymentMethodId, test });
-    resolveTempoChallenge(wwwAuth);
+    const tempoChallenge = resolveTempoChallenge(wwwAuth);
+
+    if (isTempoProofChallenge(tempoChallenge)) {
+      if (!proofSigner) {
+        await probeResponse.body?.cancel();
+        throw new Error(
+          'The Link Wallet backend does not yet expose MPP proof credentials. Set LINK_MPP_LOCAL_PRIVY=1 to use the local Privy PoC.',
+        );
+      }
+      onStep?.('signing');
+      return submitMppProof(probe, proofSigner);
+    }
+
+    if (!context) {
+      await probeResponse.body?.cancel();
+      throw new Error(
+        '--context is required for Tempo payments (min 100 chars). Describe the purchase and rationale.',
+      );
+    }
 
     onStep?.('creating');
     const spendRequest = await repository.create({
@@ -652,6 +798,11 @@ export async function runMppPayFullFlow(
   if (!amount) {
     throw new Error(
       'Could not determine amount from 402 challenge. Pass --amount explicitly.',
+    );
+  }
+  if (!context) {
+    throw new Error(
+      '--context is required for the full MPP flow (min 100 chars). Describe the purchase and rationale.',
     );
   }
 
@@ -739,6 +890,7 @@ export function MppPay({
   test,
   repository,
   paymentMethodsFactory,
+  proofSigner,
   onComplete,
 }: {
   url: string;
@@ -752,6 +904,7 @@ export function MppPay({
   test?: boolean;
   repository: ISpendRequestResource;
   paymentMethodsFactory: () => IPaymentMethodsResource;
+  proofSigner?: IMppProofSigner;
   onComplete: (result: PayResult | null) => void;
 }) {
   const [step, setStep] = useState<Step>(
@@ -777,11 +930,6 @@ export function MppPay({
             repository,
           );
         } else {
-          if (!context) {
-            throw new Error(
-              '--context is required for the full MPP flow (min 100 chars)',
-            );
-          }
           payResult = await runMppPayFullFlow({
             url,
             method,
@@ -793,6 +941,7 @@ export function MppPay({
             test: test ?? false,
             repository,
             paymentMethodsFactory,
+            proofSigner,
             onStep: setStep,
             onApprovalUrl: (u) => setApprovalUrl(u),
           });
@@ -818,6 +967,7 @@ export function MppPay({
     test,
     repository,
     paymentMethodsFactory,
+    proofSigner,
     onComplete,
   ]);
 

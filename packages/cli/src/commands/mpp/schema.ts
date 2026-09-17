@@ -30,7 +30,7 @@ export const payOptions = z.object({
     .min(100)
     .optional()
     .describe(
-      'Min 100 chars — describe the purchase and rationale shown during Link approval. Required when --spend-request-id is omitted.',
+      'Min 100 chars — describe the purchase and rationale shown during Link approval. Required for paid flows when --spend-request-id is omitted; not used for zero-dollar proofs.',
     ),
   amount: z.coerce
     .number()
@@ -56,6 +56,21 @@ export const decodeOptions = z.object({
     .describe(
       'Raw WWW-Authenticate header value; may include multiple payment challenges',
     ),
+});
+
+export const proofOptions = z.object({
+  method: z
+    .string()
+    .optional()
+    .describe('HTTP method (default: GET, or POST if --data is provided)'),
+  data: z
+    .string()
+    .optional()
+    .describe('Request body (implies POST if --method is not set)'),
+  header: z
+    .array(z.string())
+    .default([])
+    .describe('Request header in "Name: Value" format (repeatable)'),
 });
 
 export const signInWithXOptions = z.object({

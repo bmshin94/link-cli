@@ -4,11 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertTempoCompatibleOptions,
   buildSignedTransactionCredential,
+  type IMppProofSigner,
+  isTempoProofChallenge,
   payWithSignedTransaction,
   payWithSpt,
   resolveTempoChallenge,
   runMppPayFullFlow,
   runMppPayWithSpendRequest,
+  runMppProof,
 } from './pay';
 
 const STRIPE_REQUEST = {
@@ -62,6 +65,16 @@ const SIGNED_TRANSACTION = '0x76aabbcc';
 const SPONSORED_TRANSACTION = '0x78aabbcc';
 const TEMPO_SOURCE =
   'did:pkh:eip155:4217:0xa2128C4C18e47778AE9Fa98E10cf76304f228e7c';
+const PROOF_SIGNATURE = `0x${'11'.repeat(65)}`;
+
+function proofSigner() {
+  return {
+    signMppProof: vi.fn(async () => ({
+      signature: PROOF_SIGNATURE,
+      source: TEMPO_SOURCE,
+    })),
+  } satisfies IMppProofSigner;
+}
 
 function tempoChallenge(
   overrides: Record<string, unknown> = {},
@@ -529,6 +542,19 @@ describe('resolveTempoChallenge', () => {
     expect(resolved.request.feePayer).toBe(true);
   });
 
+  it('recognizes a zero-dollar proof without transaction-only fields', () => {
+    const resolved = resolveTempoChallenge(
+      tempoChallenge({
+        amount: '0',
+        recipient: undefined,
+        methodDetails: { chainId: 4217, supportedModes: ['push'] },
+      }),
+    );
+
+    expect(isTempoProofChallenge(resolved)).toBe(true);
+    expect(resolved.request.recipient).toBeUndefined();
+  });
+
   it.each([
     [{ methodDetails: { chainId: 1, supportedModes: ['pull'] } }, /chain ID/i],
     [
@@ -565,6 +591,175 @@ describe('resolveTempoChallenge', () => {
         ),
       ),
     ).toThrow(/expired/i);
+  });
+});
+
+describe('zero-dollar MPP proof', () => {
+  const zeroDollarChallenge = () =>
+    tempoChallenge({
+      amount: '0',
+      recipient: undefined,
+      methodDetails: { chainId: 4217, supportedModes: ['push'] },
+    });
+
+  it('signs and retries without exposing the proof credential', async () => {
+    const signer = proofSigner();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('authentication required', {
+          status: 402,
+          headers: { 'www-authenticate': zeroDollarChallenge() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('{"authenticated":true}', { status: 200 }),
+      );
+
+    const result = await runMppProof({
+      url: 'https://merchant.example/jobs/123',
+      method: 'GET',
+      signer,
+      fetcher,
+    });
+
+    expect(result).toMatchObject({
+      status: 200,
+      body: '{"authenticated":true}',
+    });
+    expect(signer.signMppProof).toHaveBeenCalledWith({
+      challenge: expect.objectContaining({
+        id: 'tempo_001',
+        realm: 'merchant.example',
+      }),
+      chainId: 4217,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const authorization = new Headers(fetcher.mock.calls[1]?.[1]?.headers).get(
+      'authorization',
+    );
+    expect(authorization).toMatch(/^Payment /);
+    const credential = Credential.deserialize<{
+      signature: string;
+      type: string;
+    }>(authorization as string);
+    expect(credential.payload).toEqual({
+      signature: PROOF_SIGNATURE,
+      type: 'proof',
+    });
+    expect(credential.source).toBe(TEMPO_SOURCE);
+  });
+
+  it('rejects a non-zero challenge before asking the wallet to sign', async () => {
+    const signer = proofSigner();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response('payment required', {
+        status: 402,
+        headers: { 'www-authenticate': tempoChallenge() },
+      }),
+    );
+
+    await expect(
+      runMppProof({
+        url: 'https://merchant.example/paid',
+        signer,
+        fetcher,
+      }),
+    ).rejects.toThrow(/requires a zero-dollar Tempo charge challenge/i);
+    expect(signer.signMppProof).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it('uses the credential header selected by the proof challenge', async () => {
+    const challenge = zeroDollarChallenge().replace(
+      'intent="charge",',
+      'intent="charge", header="Payment-Credential",',
+    );
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('authentication required', {
+          status: 402,
+          headers: { 'www-authenticate': challenge },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+
+    await runMppProof({
+      url: 'https://merchant.example/jobs/123',
+      headers: ['Authorization: Bearer application-token'],
+      signer: proofSigner(),
+      fetcher,
+    });
+
+    const headers = new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+    expect(headers.get('payment-credential')).toMatch(/^Payment /);
+    expect(headers.get('authorization')).toBe('Bearer application-token');
+  });
+
+  it('makes mpp pay bypass spend requests for a zero-dollar challenge', async () => {
+    const signer = proofSigner();
+    const repository = {
+      create: vi.fn(),
+      retrieve: vi.fn(),
+    } as unknown as ISpendRequestResource;
+    const paymentMethodsFactory = vi.fn();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('authentication required', {
+          status: 402,
+          headers: { 'www-authenticate': zeroDollarChallenge() },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+
+    const result = await runMppPayFullFlow({
+      url: 'https://merchant.example/jobs/123',
+      method: undefined,
+      data: undefined,
+      headers: undefined,
+      context: undefined,
+      amountOverride: undefined,
+      paymentMethodId: undefined,
+      test: false,
+      repository,
+      paymentMethodsFactory,
+      proofSigner: signer,
+    });
+
+    expect(result.status).toBe(200);
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.retrieve).not.toHaveBeenCalled();
+    expect(paymentMethodsFactory).not.toHaveBeenCalled();
+    expect(signer.signMppProof).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to follow a redirect after attaching a proof', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('authentication required', {
+          status: 402,
+          headers: { 'www-authenticate': zeroDollarChallenge() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 307,
+          headers: { location: 'https://other.example/jobs/123' },
+        }),
+      );
+
+    await expect(
+      runMppProof({
+        url: 'https://merchant.example/jobs/123',
+        signer: proofSigner(),
+        fetcher,
+      }),
+    ).rejects.toThrow(/refusing to forward the proof credential/i);
+    expect(fetcher.mock.calls[1]?.[1]?.redirect).toBe('manual');
   });
 });
 

@@ -316,6 +316,21 @@ link-cli mpp pay https://climate.stripe.dev/api/contribute \
   --header "X-Custom: value"
 ```
 
+Tempo services can use the same MPP challenge flow with `amount: "0"` to
+authenticate a wallet without moving funds. In the local Privy PoC, use
+`mpp proof` to fetch the challenge, sign its canonical EIP-712 proof, and retry
+the request without creating a spend request:
+
+```bash
+LINK_MPP_LOCAL_PRIVY=1 link-cli mpp proof \
+  https://api.example.com/jobs/job_123
+```
+
+`mpp pay` also detects zero-dollar Tempo challenges and delegates to this proof
+flow automatically. The PoC requires `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and
+`PRIVY_WALLET_ID`; the Link Wallet backend does not yet expose MPP proof
+credentials.
+
 Some x402 services require wallet authentication after payment, for example to
 poll an asynchronous job created by that wallet. In the local Privy PoC, use
 `mpp sign-in-with-x` to fetch a fresh SIWX challenge, sign its EIP-191 message,
@@ -386,6 +401,12 @@ link-cli mpp pay https://climate.stripe.dev/api/contribute \
   --data '{"amount":100}' \
   --header "X-Custom: value"
 ```
+
+For a Tempo MPP challenge with `amount: "0"`, use `mpp proof <url>` to prove
+wallet ownership and retry the request without creating a spend request. In the
+local PoC this requires `LINK_MPP_LOCAL_PRIVY=1` and the Privy wallet variables.
+`mpp pay` automatically uses the same proof path when it discovers a
+zero-dollar Tempo challenge.
 
 In agent mode (`--format json`), the full flow returns the payment continuation twice: as `_next.pay_argv` (`{ "command": "mpp", "args": [...] }`) and as `_next.pay_command`. Prefer `pay_argv` and invoke it directly, passing each `args` entry as its own process argument. The URL, body and headers can carry merchant-controlled text, so `pay_command` is shell-quoted for callers that must go through a shell — pass it to the shell verbatim, without unquoting or re-splitting it.
 
