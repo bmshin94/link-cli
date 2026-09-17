@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { LinkOptions } from '@/config';
-import { LinkApiError, LinkResponseError, LinkTransportError } from '@/errors';
+import { LinkApiError } from '@/errors';
 import { BaseResource } from '@/resources/base';
 import { parseHolderPublicJwk } from '@/resources/holder-jwk';
 import type {
@@ -51,52 +51,40 @@ export class IdentityCredentialsResource
   }
 
   private async discoverCredentialEndpoint(): Promise<string> {
-    let response: Response;
-    try {
-      response = await this.fetchImpl(LINK_ISSUER_METADATA_URL, {
-        redirect: 'manual',
-      });
-    } catch (error) {
-      throw new LinkTransportError(
-        `Request failed: GET ${LINK_ISSUER_METADATA_URL}`,
-        { cause: error },
-      );
-    }
-
-    const rawBody = await response.text();
-    if (response.status >= 300 && response.status < 400) {
+    const { status, data, rawBody } = await this.rawFetch({
+      method: 'GET',
+      url: LINK_ISSUER_METADATA_URL,
+      redirect: 'manual',
+    });
+    if (status >= 300 && status < 400) {
       throw new LinkApiError(
-        `Refused redirect while fetching issuer metadata (${response.status})`,
-        { status: response.status, rawBody },
+        `Refused redirect while fetching identity credential issuer metadata (${status})`,
+        { status, rawBody },
       );
     }
 
-    let data: unknown = null;
-    try {
-      data = JSON.parse(rawBody);
-    } catch (error) {
-      if (response.ok) {
-        throw new LinkResponseError('fetch issuer metadata', response.status, {
-          cause: error,
-        });
-      }
-    }
-    if (!response.ok) {
+    if (status < 200 || status >= 300) {
       this.throwApiError(
-        'fetch issuer metadata',
-        response.status,
+        'fetch identity credential issuer metadata',
+        status,
         data,
         rawBody,
       );
     }
 
     const metadata = this.parseResponse(
-      'parse issuer metadata',
-      response.status,
+      'parse identity credential issuer metadata',
+      status,
       () => identityCredentialIssuerMetadataSchema.parse(data),
     );
-    return this.parseResponse('validate issuer metadata', response.status, () =>
-      requireLinkEndpoint(metadata.credential_endpoint, 'credential_endpoint'),
+    return this.parseResponse(
+      'validate identity credential issuer metadata',
+      status,
+      () =>
+        requireLinkEndpoint(
+          metadata.credential_endpoint,
+          'credential_endpoint',
+        ),
     );
   }
 
@@ -105,56 +93,29 @@ export class IdentityCredentialsResource
   ): Promise<IssueIdentityCredentialResponse> {
     const publicJwk = parseHolderPublicJwk(params.cnf.jwk);
     const endpoint = await this.discoverCredentialEndpoint();
-    const send = async (forceRefresh = false): Promise<Response> => {
-      const token = await this.getAccessToken(
-        forceRefresh ? { forceRefresh: true } : undefined,
-      );
-      try {
-        return await this.fetchImpl(endpoint, {
-          method: 'POST',
-          redirect: 'manual',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ cnf: { jwk: publicJwk } }),
-        });
-      } catch (error) {
-        throw new LinkTransportError(`Request failed: POST ${endpoint}`, {
-          cause: error,
-        });
-      }
-    };
+    const { status, data, rawBody } = await this.apiFetch({
+      method: 'POST',
+      url: endpoint,
+      redirect: 'manual',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ cnf: { jwk: publicJwk } }),
+    });
 
-    let response = await send();
-    if (response.status === 401 && this.canRefreshAccessToken) {
-      response = await send(true);
-    }
-
-    const rawBody = await response.text();
-    if (response.status >= 300 && response.status < 400) {
+    if (status >= 300 && status < 400) {
       throw new LinkApiError(
-        `Refused redirect while issuing credential (${response.status})`,
-        { status: response.status, rawBody },
+        `Refused redirect while issuing identity credential (${status})`,
+        { status, rawBody },
       );
     }
 
-    let data: unknown = null;
-    try {
-      data = JSON.parse(rawBody);
-    } catch (error) {
-      if (response.ok) {
-        throw new LinkResponseError('issue credential', response.status, {
-          cause: error,
-        });
-      }
-    }
-    if (!response.ok) {
-      this.throwApiError('issue credential', response.status, data, rawBody);
+    if (status < 200 || status >= 300) {
+      this.throwApiError('issue identity credential', status, data, rawBody);
     }
 
-    return this.parseResponse('issue credential', response.status, () =>
+    return this.parseResponse('issue identity credential', status, () =>
       issueIdentityCredentialResponseSchema.parse(data),
     );
   }

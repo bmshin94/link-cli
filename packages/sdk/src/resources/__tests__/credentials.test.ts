@@ -21,12 +21,17 @@ describe('IdentityCredentialsResource', () => {
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === 'https://api.link.com/.well-known/aap-issuer') {
+          expect(init).toMatchObject({
+            method: 'GET',
+            redirect: 'manual',
+          });
           return jsonResponse({
             issuer: 'https://api.link.com',
             credential_endpoint: 'https://api.link.com/credential',
           });
         }
         expect(url).toBe('https://api.link.com/credential');
+        expect(init?.redirect).toBe('manual');
         expect(init?.headers).toMatchObject({
           Authorization: 'Bearer access-token',
         });
@@ -212,9 +217,9 @@ describe('IdentityCredentialsResource', () => {
     });
 
     await expect(resource.issue({ cnf: { jwk: PUBLIC_JWK } })).rejects.toThrow(
-      'Failed to issue credential (401)',
+      'Failed to issue identity credential (401)',
     );
-    expect(getAccessToken).toHaveBeenNthCalledWith(1, undefined);
+    expect(getAccessToken).toHaveBeenNthCalledWith(1);
     expect(getAccessToken).toHaveBeenNthCalledWith(2, { forceRefresh: true });
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
       headers: expect.objectContaining({
