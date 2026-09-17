@@ -4,6 +4,7 @@ import Spinner from 'ink-spinner';
 import type React from 'react';
 import { useCallback } from 'react';
 import { useAsyncAction } from '../../hooks/use-async-action';
+import { formatAmount } from '../../utils/format-amount';
 
 interface PaymentMethodRetrieveProps {
   resource: IPaymentMethodsResource;
@@ -73,11 +74,13 @@ export const PaymentMethodRetrieve: React.FC<PaymentMethodRetrieveProps> = ({
             {details.last4}
           </Text>
         ) : null}
-        {method.balance_details ? (
+        {method.balance_details?.available_balance ? (
           <Text>
             <Text dimColor>Available balance: </Text>
-            {method.balance_details.available_balance.amount}{' '}
-            {method.balance_details.available_balance.currency.toUpperCase()}
+            {formatAmount(
+              method.balance_details.available_balance.amount,
+              method.balance_details.available_balance.currency,
+            )}
           </Text>
         ) : null}
         <Text>

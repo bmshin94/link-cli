@@ -174,11 +174,11 @@ export interface CardDetails {
 
 export interface BankAccountDetails {
   last4: string;
-  bank_name?: string;
+  bank_name?: string | null;
 }
 
 export interface PaymentMethodBalanceDetails {
-  available_balance: {
+  available_balance?: {
     amount: number;
     currency: string;
   };
@@ -262,10 +262,10 @@ export interface PaymentMethod {
   is_default: boolean;
   name: string;
   nickname?: string;
-  card_details?: CardDetails;
-  bank_account_details?: BankAccountDetails;
-  balance_details?: PaymentMethodBalanceDetails;
-  capabilities?: Record<string, ProductCapability>;
+  card_details?: CardDetails | null;
+  bank_account_details?: BankAccountDetails | null;
+  balance_details?: PaymentMethodBalanceDetails | null;
+  capabilities?: Record<string, ProductCapability> | null;
 }
 
 export interface ShippingAddress {
