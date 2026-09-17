@@ -37,6 +37,9 @@ describe('ResourceFactory', () => {
     expect(factory.createBalancesResource()).toBe(
       factory.createBalancesResource(),
     );
+    expect(factory.createSummariesResource()).toBe(
+      factory.createSummariesResource(),
+    );
     expect(factory.createWebBotAuthResource()).toBe(
       factory.createWebBotAuthResource(),
     );
@@ -45,6 +48,7 @@ describe('ResourceFactory', () => {
     expect(factory.createSpendRequestResource().create).toBeTypeOf('function');
     expect(factory.createPaymentMethodsResource().list).toBeTypeOf('function');
     expect(factory.createBalancesResource().list).toBeTypeOf('function');
+    expect(factory.createSummariesResource().list).toBeTypeOf('function');
     expect(factory.createWebBotAuthResource().signUrl).toBeTypeOf('function');
   });
 

@@ -9,6 +9,7 @@ import type {
   IShippingAddressResource,
   ISourcesResource,
   ISpendRequestResource,
+  ISummariesResource,
   ITransactionsResource,
   IUserInfoResource,
   IWebBotAuthResource,
@@ -18,6 +19,7 @@ import { ReportResource } from '@/resources/report';
 import { ShippingAddressResource } from '@/resources/shipping-address';
 import { SourcesResource } from '@/resources/sources';
 import { SpendRequestResource } from '@/resources/spend-request';
+import { SummariesResource } from '@/resources/summaries';
 import { TransactionsResource } from '@/resources/transactions';
 import { UserInfoResource } from '@/resources/user-info';
 import { WebBotAuthResource } from '@/resources/web-bot-auth';
@@ -31,6 +33,7 @@ export class Link {
   readonly transactions: ITransactionsResource;
   readonly sources: ISourcesResource;
   readonly balances: IBalancesResource;
+  readonly summaries: ISummariesResource;
   readonly webBotAuth: IWebBotAuthResource;
   readonly reports: IReportResource;
 
@@ -43,6 +46,7 @@ export class Link {
     this.transactions = new TransactionsResource(options);
     this.sources = new SourcesResource(options);
     this.balances = new BalancesResource(options);
+    this.summaries = new SummariesResource(options);
     this.webBotAuth = new WebBotAuthResource(options);
     this.reports = new ReportResource(options);
   }

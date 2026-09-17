@@ -7,6 +7,7 @@ import {
   type IShippingAddressResource,
   type ISourcesResource,
   type ISpendRequestResource,
+  type ISummariesResource,
   type ITransactionsResource,
   type IUserInfoResource,
   type IWebBotAuthResource,
@@ -116,6 +117,7 @@ export class ResourceFactory {
   private userInfoResource?: IUserInfoResource;
   private transactionsResource?: ITransactionsResource;
   private sourcesResource?: ISourcesResource;
+  private summariesResource?: ISummariesResource;
   private balancesResource?: IBalancesResource;
   private webBotAuthResource?: IWebBotAuthResource;
   private reportResource?: IReportResource;
@@ -289,6 +291,16 @@ export class ResourceFactory {
 
     const resource = sanitizeResource(this.createSdkClient().sources);
     this.sourcesResource = resource;
+    return resource;
+  }
+
+  createSummariesResource(): ISummariesResource {
+    if (this.summariesResource) {
+      return this.summariesResource;
+    }
+
+    const resource = sanitizeResource(this.createSdkClient().summaries);
+    this.summariesResource = resource;
     return resource;
   }
 
