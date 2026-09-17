@@ -6,18 +6,15 @@ import {
   parseHolderPublicJwk,
 } from '@stripe/link-sdk';
 import { sanitizeDeep } from '../../utils/sanitize-text';
-import { type HolderKeyType, loadOrCreateHolderKey } from './holder-key';
+import { DEFAULT_HOLDER_KEY_PATH, loadOrCreateHolderKey } from './holder-key';
 
 export const CREDENTIAL_ARTIFACT_VERSION = 1 as const;
 
-export type HolderOwnership = 'managed' | 'external';
-
 export interface CredentialHolder {
-  ownership: HolderOwnership;
   jwk: HolderPublicJwk;
   thumbprint: string;
-  path?: string;
-  created?: boolean;
+  path: string;
+  created: boolean;
 }
 
 export interface CredentialIssueResult {
@@ -29,10 +26,6 @@ export interface CredentialIssueResult {
   /** Claim names and values recovered from disclosures. Inspection only. */
   claims?: Record<string, unknown>;
 }
-
-export type CredentialKeySource =
-  | { kind: 'managed'; keyFile: string; keyType: HolderKeyType }
-  | { kind: 'external'; publicJwk: HolderPublicJwk };
 
 function decodeJsonSegment(segment: string): unknown {
   return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
@@ -74,19 +67,16 @@ function credentialHolderJwk(credential: string): HolderPublicJwk {
 
 export async function issueCredential(options: {
   resource: ICredentialsResource;
-  source: CredentialKeySource;
+  keyFile?: string;
   includeClaims?: boolean;
 }): Promise<CredentialIssueResult> {
-  const { resource, source, includeClaims = true } = options;
-  let publicJwk: HolderPublicJwk;
-  let managedCreated: boolean | undefined;
-  if (source.kind === 'managed') {
-    const managed = loadOrCreateHolderKey(source.keyFile, source.keyType);
-    publicJwk = managed.publicJwk;
-    managedCreated = managed.created;
-  } else {
-    publicJwk = source.publicJwk;
-  }
+  const {
+    resource,
+    keyFile = DEFAULT_HOLDER_KEY_PATH,
+    includeClaims = true,
+  } = options;
+  const holderKey = loadOrCreateHolderKey(keyFile, 'ed25519');
+  const publicJwk = holderKey.publicJwk;
 
   const response = await resource.issue({
     cnf: { jwk: publicJwk },
@@ -103,20 +93,12 @@ export async function issueCredential(options: {
     credential: response.credential,
     issuer: response.issuer,
     expires_at: response.expires_at,
-    holder:
-      source.kind === 'managed'
-        ? {
-            ownership: 'managed',
-            jwk: publicJwk,
-            thumbprint: holderJwkThumbprint(publicJwk),
-            path: source.keyFile,
-            created: managedCreated === true,
-          }
-        : {
-            ownership: 'external',
-            jwk: publicJwk,
-            thumbprint: holderJwkThumbprint(publicJwk),
-          },
+    holder: {
+      jwk: publicJwk,
+      thumbprint: holderJwkThumbprint(publicJwk),
+      path: keyFile,
+      created: holderKey.created,
+    },
     ...(includeClaims
       ? { claims: sanitizeDeep(decodeDisclosedClaims(response.credential)) }
       : {}),

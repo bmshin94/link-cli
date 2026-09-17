@@ -158,7 +158,7 @@ export function loadHolderKey(path: string): HolderKey {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
-        `Holder key not found at ${path}. Issue a new credential after creating a key, or use --public-key-file for an agent-managed key.`,
+        `Holder key not found at ${path}. Issue a new credential to create it.`,
       );
     }
     throw new Error(

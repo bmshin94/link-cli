@@ -1,23 +1,12 @@
 import { generateKeyPairSync } from 'node:crypto';
-import {
-  existsSync,
-  mkdtempSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HolderPublicJwk, ICredentialsResource } from '@stripe/link-sdk';
 import { holderJwkThumbprint } from '@stripe/link-sdk';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  DEFAULT_HOLDER_KEY_PATH,
-  loadHolderKey,
-  loadOrCreateHolderKey,
-} from '../holder-key';
+import { loadHolderKey, loadOrCreateHolderKey } from '../holder-key';
 import { issueCredential } from '../issue';
-import { resolveCredentialKeySource } from '../key-source';
 
 function publicJwkFromPrivate(type: 'ed25519' | 'p256'): {
   privateJwk: Record<string, unknown>;
@@ -64,58 +53,7 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'link-credential-'));
 }
 
-describe('resolveCredentialKeySource', () => {
-  it('treats an explicit public-key file as external and does not default a private key', () => {
-    const dir = tempDir();
-    const { publicJwk } = publicJwkFromPrivate('ed25519');
-    const publicKeyFile = join(dir, 'public.jwk');
-    writeFileSync(publicKeyFile, JSON.stringify(publicJwk));
-
-    expect(resolveCredentialKeySource({ publicKeyFile })).toEqual({
-      kind: 'external',
-      publicJwk,
-    });
-  });
-
-  it('uses the default managed holder key when no public key is supplied', () => {
-    expect(resolveCredentialKeySource({})).toEqual({
-      kind: 'managed',
-      keyFile: DEFAULT_HOLDER_KEY_PATH,
-      keyType: 'ed25519',
-    });
-  });
-});
-
 describe('issueCredential', () => {
-  it('issues to a public JWK without creating a private key file', async () => {
-    const dir = tempDir();
-    const { publicJwk } = publicJwkFromPrivate('ed25519');
-    const keyFile = join(dir, 'holder-key.jwk');
-    const resource: ICredentialsResource = {
-      issue: vi.fn(async ({ cnf }) => ({
-        credential: compactCredential(cnf.jwk, { email: 'user@example.com' }),
-        issuer: 'https://api.link.com',
-        expires_at: '2026-09-15T00:00:00Z',
-      })),
-    };
-
-    const result = await issueCredential({
-      resource,
-      source: { kind: 'external', publicJwk },
-    });
-
-    expect(existsSync(keyFile)).toBe(false);
-    expect(result.version).toBe(1);
-    expect(result.holder).toEqual({
-      ownership: 'external',
-      jwk: publicJwk,
-      thumbprint: holderJwkThumbprint(publicJwk),
-    });
-    expect(result.holder.path).toBeUndefined();
-    expect(result.claims).toEqual({ email: 'user@example.com' });
-    expect(resource.issue).toHaveBeenCalledWith({ cnf: { jwk: publicJwk } });
-  });
-
   it('issues a managed credential and records the local key path', async () => {
     const dir = tempDir();
     const keyFile = join(dir, 'holder-key.jwk');
@@ -129,17 +67,24 @@ describe('issueCredential', () => {
 
     const result = await issueCredential({
       resource,
-      source: { kind: 'managed', keyFile, keyType: 'ed25519' },
+      keyFile,
     });
 
     expect(existsSync(keyFile)).toBe(true);
-    expect(result.holder.ownership).toBe('managed');
+    expect(result.version).toBe(1);
     expect(result.holder.path).toBe(keyFile);
     expect(result.holder.created).toBe(true);
+    expect(result.holder.thumbprint).toBe(
+      holderJwkThumbprint(result.holder.jwk),
+    );
+    expect(result.claims).toEqual({ email: 'user@example.com' });
+    expect(resource.issue).toHaveBeenCalledWith({
+      cnf: { jwk: result.holder.jwk },
+    });
   });
 
   it('sanitizes disclosed claims before returning them to the CLI', async () => {
-    const { publicJwk } = publicJwkFromPrivate('ed25519');
+    const keyFile = join(tempDir(), 'holder-key.jwk');
     const resource: ICredentialsResource = {
       issue: vi.fn(async ({ cnf }) => ({
         credential: compactCredential(cnf.jwk, {
@@ -152,14 +97,14 @@ describe('issueCredential', () => {
 
     const result = await issueCredential({
       resource,
-      source: { kind: 'external', publicJwk },
+      keyFile,
     });
 
     expect(result.claims).toEqual({ email: 'user@example.com' });
   });
 
   it('rejects an issued credential whose cnf.jwk does not match', async () => {
-    const { publicJwk } = publicJwkFromPrivate('ed25519');
+    const keyFile = join(tempDir(), 'holder-key.jwk');
     const other = publicJwkFromPrivate('ed25519').publicJwk;
     const resource: ICredentialsResource = {
       issue: vi.fn(async () => ({
@@ -172,7 +117,7 @@ describe('issueCredential', () => {
     await expect(
       issueCredential({
         resource,
-        source: { kind: 'external', publicJwk },
+        keyFile,
       }),
     ).rejects.toThrow('does not match the requested holder public key');
   });

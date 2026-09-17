@@ -262,10 +262,9 @@ Attestation tokens can be used to respond to attestation challenges presented by
 
 ```bash
 LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get
-LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get --public-key-file ./holder-public.jwk
 ```
 
-`identity credentials get` returns a signed credential bound to the default holder key at `~/.link/holder-key.jwk`; use `--public-key-file` to bind it to an externally managed key instead.
+`identity credentials get` returns a signed credential bound to the CLI-managed holder key at `~/.link/holder-key.jwk`.
 
 ### Spend request lifecycle
 
