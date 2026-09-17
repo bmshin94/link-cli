@@ -1,6 +1,6 @@
+import { describe, expect, it, vi } from 'vitest';
 import { LinkResponseError } from '@/errors';
 import { CredentialsResource } from '@/resources/credentials';
-import { describe, expect, it, vi } from 'vitest';
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -20,13 +20,13 @@ describe('CredentialsResource', () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith('/.well-known/aap-issuer')) {
+        if (url === 'https://api.link.com/.well-known/aap-issuer') {
           return jsonResponse({
-            issuer: 'https://issuer.example',
-            credential_endpoint: 'https://issuer.example/credential',
+            issuer: 'https://api.link.com',
+            credential_endpoint: 'https://api.link.com/credential',
           });
         }
-        expect(url).toBe('https://issuer.example/credential');
+        expect(url).toBe('https://api.link.com/credential');
         expect(init?.headers).toMatchObject({
           Authorization: 'Bearer access-token',
         });
@@ -35,13 +35,13 @@ describe('CredentialsResource', () => {
         });
         return jsonResponse({
           credential: 'issuer-jwt~',
-          issuer: 'https://issuer.example',
+          issuer: 'https://api.link.com',
           expires_at: '2026-08-25T00:00:00Z',
         });
       },
     );
     const resource = new CredentialsResource({
-      apiBaseUrl: 'https://issuer.example',
+      apiBaseUrl: 'https://attacker.example',
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -50,9 +50,30 @@ describe('CredentialsResource', () => {
       resource.issue({ cnf: { jwk: PUBLIC_JWK } }),
     ).resolves.toMatchObject({
       credential: 'issuer-jwt~',
-      issuer: 'https://issuer.example',
+      issuer: 'https://api.link.com',
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects metadata for a different issuer before authentication', async () => {
+    const getAccessToken = vi.fn(async () => 'secret');
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          issuer: 'https://attacker.example',
+          credential_endpoint: 'https://api.link.com/credential',
+        }),
+    );
+    const resource = new CredentialsResource({
+      getAccessToken,
+      fetch: fetchMock,
+    });
+
+    await expect(
+      resource.issue({ cnf: { jwk: PUBLIC_JWK } }),
+    ).rejects.toBeInstanceOf(LinkResponseError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getAccessToken).not.toHaveBeenCalled();
   });
 
   it('rejects an off-origin credential endpoint before authentication', async () => {
@@ -60,12 +81,11 @@ describe('CredentialsResource', () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         jsonResponse({
-          issuer: 'https://issuer.example',
+          issuer: 'https://api.link.com',
           credential_endpoint: 'https://attacker.example/credential',
         }),
     );
     const resource = new CredentialsResource({
-      apiBaseUrl: 'https://issuer.example',
       getAccessToken,
       fetch: fetchMock,
     });
@@ -86,7 +106,6 @@ describe('CredentialsResource', () => {
         }),
     );
     const resource = new CredentialsResource({
-      apiBaseUrl: 'https://issuer.example',
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -102,13 +121,12 @@ describe('CredentialsResource', () => {
       async (input: RequestInfo | URL, _init?: RequestInit) =>
         String(input).endsWith('/.well-known/aap-issuer')
           ? jsonResponse({
-              issuer: 'https://issuer.example',
-              credential_endpoint: 'https://issuer.example/credential',
+              issuer: 'https://api.link.com',
+              credential_endpoint: 'https://api.link.com/credential',
             })
           : jsonResponse({ credential: 42 }),
     );
     const resource = new CredentialsResource({
-      apiBaseUrl: 'https://issuer.example',
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -118,13 +136,60 @@ describe('CredentialsResource', () => {
     ).rejects.toBeInstanceOf(LinkResponseError);
   });
 
+  it('rejects a credential response from a different issuer', async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) =>
+        String(input).endsWith('/.well-known/aap-issuer')
+          ? jsonResponse({
+              issuer: 'https://api.link.com',
+              credential_endpoint: 'https://api.link.com/credential',
+            })
+          : jsonResponse({
+              credential: 'issuer-jwt~',
+              issuer: 'https://attacker.example',
+              expires_at: '2026-08-25T00:00:00Z',
+            }),
+    );
+    const resource = new CredentialsResource({
+      accessToken: 'access-token',
+      fetch: fetchMock,
+    });
+
+    await expect(
+      resource.issue({ cnf: { jwk: PUBLIC_JWK } }),
+    ).rejects.toBeInstanceOf(LinkResponseError);
+  });
+
+  it('rejects private JWK members before any network request', async () => {
+    const getAccessToken = vi.fn(async () => 'secret');
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          issuer: 'https://api.link.com',
+          credential_endpoint: 'https://api.link.com/credential',
+        }),
+    );
+    const resource = new CredentialsResource({
+      getAccessToken,
+      fetch: fetchMock,
+    });
+
+    await expect(
+      resource.issue({
+        cnf: { jwk: { ...PUBLIC_JWK, d: 'private' } as never },
+      }),
+    ).rejects.toThrow('must not include private members');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
+
   it('refreshes LinkOptions authentication after a credential 401', async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, _init?: RequestInit) =>
         String(input).endsWith('/.well-known/aap-issuer')
           ? jsonResponse({
-              issuer: 'https://issuer.example',
-              credential_endpoint: 'https://issuer.example/credential',
+              issuer: 'https://api.link.com',
+              credential_endpoint: 'https://api.link.com/credential',
             })
           : jsonResponse({ error: 'unauthorized' }, 401),
     );
@@ -133,7 +198,6 @@ describe('CredentialsResource', () => {
         forceRefresh ? 'refreshed-token' : 'initial-token',
     );
     const resource = new CredentialsResource({
-      apiBaseUrl: 'https://issuer.example',
       getAccessToken,
       fetch: fetchMock,
     });

@@ -151,10 +151,10 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 
 `identity credentials get [--key-file <path>] [--public-key-file <path>] [--key-type ed25519|p256] [--output-file <path>] [--force] [--access-token <t>]` — gets signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Agent-only output. The SDK discovers and calls `credential_endpoint`; the CLI owns local key persistence, public-key-only issuance, claim decoding, schema, and command registration under `packages/cli/src/commands/identity/`.
 
-- Discovery uses `GET <issuer>/.well-known/aap-issuer`, where `<issuer>` is `LINK_API_BASE_URL` or `https://api.link.com`. The metadata `issuer` and `credential_endpoint` must remain on that HTTPS DNS origin.
+- Discovery uses `GET https://api.link.com/.well-known/aap-issuer`. The metadata issuer must be exactly `https://api.link.com`, and `credential_endpoint` must remain on that HTTPS origin. `LINK_API_BASE_URL` does not change the credential issuer.
 - `POST <credential_endpoint>` sends `{"cnf":{"jwk":<public JWK>}}`. Only the public Ed25519 or P-256 members are sent. Private members such as `d` are rejected.
 - Resolve the key source before applying defaults. `--public-key-file` issues to a caller-supplied public JWK and must not open, create, or overwrite a private-key file. `--key-file` and `--public-key-file` conflict. `--key-type` applies only to managed-key generation.
-- Managed issuance persists the private key at `--key-file` (default `~/.link/holder-key.jwk`, mode 0600). External issuance records `holder.ownership: "external"` with the public JWK and RFC 7638 thumbprint, and no local private-key path.
+- Managed issuance atomically persists the private key at `--key-file` (default `~/.link/holder-key.jwk`, mode 0600) and refuses symbolic-link paths. External issuance records `holder.ownership: "external"` with the public JWK and RFC 7638 thumbprint, and no local private-key path.
 - `--output-file` writes the versioned credential artifact as JSON (0600; `--force` to overwrite). The issued `cnf.jwk` is checked against the requested public key before returning.
 - Requires `userinfo:read` and `payment_methods.agentic`; no additional OAuth scope is required.
 
@@ -184,6 +184,7 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 Server-returned strings can contain ANSI escape sequences or control characters that spoof the terminal approval UI. Sanitization is handled automatically via `sanitizeDeep()` from `packages/cli/src/utils/sanitize-text.ts`:
 
 - **SDK-resource data** — sanitized automatically at the `sanitizeResource()` proxy boundary in `packages/cli/src/utils/resource-factory.ts`. All server data flowing through SDK resources (spend-request, payment-methods, sources, etc.) is `sanitizeDeep()`'d before reaching components or the incur formatter, in every output format.
+- **Encoded server data decoded by the CLI** — must be sanitized after decoding. Credential issuance sanitizes claims recovered from SD-JWT disclosures in `commands/credentials/issue.ts`; sanitizing the compact credential string at the resource boundary does not sanitize its decoded values.
 - **Commands using `useAsyncAction` hook** — sanitized automatically. The hook calls `sanitizeDeep()` on all returned data before it reaches components.
 - **Commands with manual state management** (e.g. `create.tsx`, `retrieve.tsx`, `request-approval.tsx`, `mpp/pay.tsx`) — must call `sanitizeDeep()` on API responses before calling `setRequest()`/`setState()`.
 - **Attacker-controlled data that does NOT flow through an SDK resource** — must be sanitized at its own parse boundary. `mpp pay` sanitizes the HTTP response in `readPayResult()` (`pay.tsx`); `mpp decode` sanitizes the parsed `WWW-Authenticate` challenge in `decodeStripeChallenge()` (`decode.ts`). These bypass the resource factory, so the return value of the parse/fetch helper is the chokepoint — sanitizing there covers both the interactive Ink render and the agent (toon/yaml/md) output at once.

@@ -8,9 +8,7 @@ import { createCredentialsCli } from '../credentials';
 
 export function createIdentityCli(options: {
   createAttestationsResource: () => IAttestationsResource;
-  createCredentialsResource: (
-    accessToken?: string,
-  ) => ICredentialsResource;
+  createCredentialsResource: (accessToken?: string) => ICredentialsResource;
 }) {
   const cli = Cli.create('identity', {
     description: 'Prove your agent and user identity with Link.',

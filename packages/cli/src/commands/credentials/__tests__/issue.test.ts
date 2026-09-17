@@ -1,5 +1,11 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HolderPublicJwk, ICredentialsResource } from '@stripe/link-sdk';
@@ -40,7 +46,7 @@ function compactCredential(
 ): string {
   const jwt = `${encodeSegment({ alg: 'EdDSA', typ: 'vc+sd-jwt' })}.${encodeSegment(
     {
-      iss: 'https://issuer.example',
+      iss: 'https://api.link.com',
       cnf: { jwk },
     },
   )}.sig`;
@@ -94,7 +100,7 @@ describe('issueCredential', () => {
     const resource: ICredentialsResource = {
       issue: vi.fn(async ({ cnf }) => ({
         credential: compactCredential(cnf.jwk, { email: 'user@example.com' }),
-        issuer: 'https://issuer.example',
+        issuer: 'https://api.link.com',
         expires_at: '2026-09-15T00:00:00Z',
       })),
     };
@@ -122,7 +128,7 @@ describe('issueCredential', () => {
     const resource: ICredentialsResource = {
       issue: vi.fn(async ({ cnf }) => ({
         credential: compactCredential(cnf.jwk),
-        issuer: 'https://issuer.example',
+        issuer: 'https://api.link.com',
         expires_at: '2026-09-15T00:00:00Z',
       })),
     };
@@ -138,13 +144,33 @@ describe('issueCredential', () => {
     expect(result.holder.created).toBe(true);
   });
 
+  it('sanitizes disclosed claims before returning them to the CLI', async () => {
+    const { publicJwk } = publicJwkFromPrivate('ed25519');
+    const resource: ICredentialsResource = {
+      issue: vi.fn(async ({ cnf }) => ({
+        credential: compactCredential(cnf.jwk, {
+          email: '\u001b[2Juser@example.com\u0007',
+        }),
+        issuer: 'https://api.link.com',
+        expires_at: '2026-09-15T00:00:00Z',
+      })),
+    };
+
+    const result = await issueCredential({
+      resource,
+      source: { kind: 'external', publicJwk },
+    });
+
+    expect(result.claims).toEqual({ email: 'user@example.com' });
+  });
+
   it('rejects an issued credential whose cnf.jwk does not match', async () => {
     const { publicJwk } = publicJwkFromPrivate('ed25519');
     const other = publicJwkFromPrivate('ed25519').publicJwk;
     const resource: ICredentialsResource = {
       issue: vi.fn(async () => ({
         credential: compactCredential(other),
-        issuer: 'https://issuer.example',
+        issuer: 'https://api.link.com',
         expires_at: '2026-09-15T00:00:00Z',
       })),
     };
@@ -169,7 +195,20 @@ describe('loadHolderKey', () => {
     const keyFile = join(tempDir(), 'holder-key.jwk');
     const created = loadOrCreateHolderKey(keyFile, 'ed25519');
     const loaded = loadHolderKey(keyFile);
+    expect(statSync(keyFile).mode & 0o777).toBe(0o600);
     expect(loaded.created).toBe(false);
     expect(loaded.publicJwk).toEqual(created.publicJwk);
+  });
+
+  it('refuses to read or write a holder key through a symbolic link', () => {
+    const dir = tempDir();
+    const target = join(dir, 'target.jwk');
+    const keyFile = join(dir, 'holder-key.jwk');
+    symlinkSync(target, keyFile);
+
+    expect(() => loadOrCreateHolderKey(keyFile, 'ed25519')).toThrow(
+      'symbolic link',
+    );
+    expect(existsSync(target)).toBe(false);
   });
 });

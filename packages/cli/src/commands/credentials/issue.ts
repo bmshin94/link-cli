@@ -1,10 +1,11 @@
 import {
   type HolderPublicJwk,
-  type ICredentialsResource,
-  holderJwkThumbprint,
   holderJwksEqual,
+  holderJwkThumbprint,
+  type ICredentialsResource,
   parseHolderPublicJwk,
 } from '@stripe/link-sdk';
+import { sanitizeDeep } from '../../utils/sanitize-text';
 import { type HolderKeyType, loadOrCreateHolderKey } from './holder-key';
 
 export const CREDENTIAL_ARTIFACT_VERSION = 1 as const;
@@ -117,7 +118,7 @@ export async function issueCredential(options: {
             thumbprint: holderJwkThumbprint(publicJwk),
           },
     ...(includeClaims
-      ? { claims: decodeDisclosedClaims(response.credential) }
+      ? { claims: sanitizeDeep(decodeDisclosedClaims(response.credential)) }
       : {}),
   };
 }

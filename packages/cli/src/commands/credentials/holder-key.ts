@@ -1,9 +1,18 @@
 import {
-  type KeyObject,
   createPrivateKey,
   generateKeyPairSync,
+  type KeyObject,
 } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { HolderPublicJwk } from '@stripe/link-sdk';
@@ -31,6 +40,20 @@ export interface HolderKey {
 interface StoredHolderKey {
   type: HolderKeyType;
   private_jwk: Record<string, unknown>;
+}
+
+function readHolderKeyFile(path: string): string {
+  if (lstatSync(path).isSymbolicLink()) {
+    throw new Error('holder key path is a symbolic link');
+  }
+
+  const noFollowFlag = constants.O_NOFOLLOW ?? 0;
+  const descriptor = openSync(path, constants.O_RDONLY | noFollowFlag);
+  try {
+    return readFileSync(descriptor, 'utf8');
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function toPublicJwk(privateKey: KeyObject): HolderPublicJwk {
@@ -63,7 +86,7 @@ export function loadOrCreateHolderKey(
 ): HolderKey {
   let stored: StoredHolderKey | undefined;
   try {
-    stored = JSON.parse(readFileSync(path, 'utf8')) as StoredHolderKey;
+    stored = JSON.parse(readHolderKeyFile(path)) as StoredHolderKey;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw new Error(
@@ -94,11 +117,27 @@ export function loadOrCreateHolderKey(
     >,
   };
 
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
-  // writeFileSync's mode is ignored when the file already exists, so set it
-  // explicitly — this file holds a private key.
-  chmodSync(path, 0o600);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const noFollowFlag = constants.O_NOFOLLOW ?? 0;
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollowFlag,
+      0o600,
+    );
+    writeFileSync(descriptor, `${JSON.stringify(payload, null, 2)}\n`);
+    fchmodSync(descriptor, 0o600);
+  } catch (error) {
+    throw new Error(
+      `Failed to write holder key at ${path}: ${(error as Error).message}`,
+      { cause: error },
+    );
+  } finally {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
+  }
 
   return {
     type,
@@ -115,7 +154,7 @@ export function loadOrCreateHolderKey(
 export function loadHolderKey(path: string): HolderKey {
   let stored: StoredHolderKey;
   try {
-    stored = JSON.parse(readFileSync(path, 'utf8')) as StoredHolderKey;
+    stored = JSON.parse(readHolderKeyFile(path)) as StoredHolderKey;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(

@@ -1,4 +1,4 @@
-import type { ICredentialsResource } from '@stripe/link-sdk';
+import { type ICredentialsResource, LinkSdkError } from '@stripe/link-sdk';
 import { Cli } from 'incur';
 import { issueCredential } from './issue';
 import {
@@ -43,6 +43,9 @@ export function createCredentialsCli(
           source,
         });
       } catch (error) {
+        if (error instanceof LinkSdkError) {
+          throw error;
+        }
         return c.error({
           code: 'INVALID_INPUT',
           message: (error as Error).message,
@@ -53,7 +56,17 @@ export function createCredentialsCli(
         const { writeCredentialFile } = await import(
           '../../utils/credential-output'
         );
-        await writeCredentialFile(outputFile, result, force);
+        try {
+          await writeCredentialFile(outputFile, result, force);
+        } catch (error) {
+          const message = (error as Error).message;
+          const code = message.startsWith('OUTPUT_FILE_EXISTS')
+            ? 'OUTPUT_FILE_EXISTS'
+            : message.startsWith('OUTPUT_FILE_SYMLINK')
+              ? 'OUTPUT_FILE_SYMLINK'
+              : 'OUTPUT_FILE_WRITE_ERROR';
+          return c.error({ code, message });
+        }
       }
       return result;
     },

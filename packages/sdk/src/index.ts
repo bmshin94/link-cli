@@ -9,11 +9,11 @@ export {
 } from './errors';
 export * from './resources/attestations';
 export * from './resources/credentials';
-export * from './resources/interfaces';
 export {
-  holderJwkThumbprint,
   holderJwksEqual,
+  holderJwkThumbprint,
   parseHolderPublicJwk,
 } from './resources/holder-jwk';
+export * from './resources/interfaces';
 export { getDuplicateSpendRequest } from './resources/spend-request';
 export * from './types/index';

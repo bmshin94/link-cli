@@ -1,11 +1,11 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
 import { LinkConfigurationError } from '@/errors';
 import {
-  holderJwkThumbprint,
   holderJwksEqual,
+  holderJwkThumbprint,
   parseHolderPublicJwk,
 } from '@/resources/holder-jwk';
-import { describe, expect, it } from 'vitest';
 
 function ed25519PublicJwk(): { kty: 'OKP'; crv: 'Ed25519'; x: string } {
   const { publicKey } = generateKeyPairSync('ed25519');

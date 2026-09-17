@@ -72,6 +72,10 @@ interface ResourceFactoryOptions {
   fetch?: typeof globalThis.fetch;
 }
 
+type SdkAuthentication =
+  | { accessToken: string; getAccessToken?: never }
+  | { accessToken?: never; getAccessToken: AccessTokenProvider };
+
 function createProxyFetch(
   baseFetch: typeof globalThis.fetch,
   proxyUrl: string,
@@ -138,11 +142,11 @@ export class ResourceFactory {
     this._authResource = options.authResource;
   }
 
-  private createSdkOptions(getAccessToken: AccessTokenProvider): LinkOptions {
+  private createSdkOptions(authentication: SdkAuthentication): LinkOptions {
     return {
       verbose: this.verbose,
       defaultHeaders: this.defaultHeaders,
-      getAccessToken,
+      ...authentication,
       apiBaseUrl: this.apiBaseUrl,
       spendRequestBaseUrl: this.spendRequestBaseUrl,
       fetch: this.fetch,
@@ -218,7 +222,9 @@ export class ResourceFactory {
   private createSdkClient(): Link {
     if (!this.sdkClient) {
       this.sdkClient = new Link(
-        this.createSdkOptions(this.createSdkAccessTokenProvider()),
+        this.createSdkOptions({
+          getAccessToken: this.createSdkAccessTokenProvider(),
+        }),
       );
     }
     return this.sdkClient;

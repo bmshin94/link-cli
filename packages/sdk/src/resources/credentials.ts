@@ -1,27 +1,46 @@
+import { z } from 'zod';
 import type { LinkOptions } from '@/config';
 import { LinkApiError, LinkResponseError, LinkTransportError } from '@/errors';
-import {
-  parseIssuerOrigin,
-  requireIssuerEndpoint,
-} from '@/resources/issuer-origin';
 import { BaseResource } from '@/resources/base';
+import { parseHolderPublicJwk } from '@/resources/holder-jwk';
 import type {
   CredentialIssueParams,
   CredentialIssueResponse,
   ICredentialsResource,
 } from '@/resources/interfaces';
-import { z } from 'zod';
+
+const LINK_ISSUER = 'https://api.link.com';
+const LINK_ISSUER_METADATA_URL = `${LINK_ISSUER}/.well-known/aap-issuer`;
 
 const credentialIssuerMetadataSchema = z.looseObject({
-  issuer: z.string(),
+  issuer: z.literal(LINK_ISSUER),
   credential_endpoint: z.string(),
 });
 
 const credentialIssueResponseSchema = z.looseObject({
   credential: z.string(),
-  issuer: z.string(),
+  issuer: z.literal(LINK_ISSUER),
   expires_at: z.string(),
 });
+
+/** Accepts a discovered endpoint only when it remains on api.link.com. */
+function requireLinkEndpoint(value: string, field: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw new TypeError(`${field} is not a valid URL`, { cause: error });
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.origin !== LINK_ISSUER ||
+    url.username ||
+    url.password
+  ) {
+    throw new TypeError(`${field} must be an HTTPS URL on ${LINK_ISSUER}`);
+  }
+  return url.href;
+}
 
 export class CredentialsResource
   extends BaseResource
@@ -32,15 +51,16 @@ export class CredentialsResource
   }
 
   private async discoverCredentialEndpoint(): Promise<string> {
-    const issuerUrl = parseIssuerOrigin(this.endpoint);
-    const metadataUrl = new URL('/.well-known/aap-issuer', issuerUrl).href;
     let response: Response;
     try {
-      response = await this.fetchImpl(metadataUrl, { redirect: 'manual' });
-    } catch (error) {
-      throw new LinkTransportError(`Request failed: GET ${metadataUrl}`, {
-        cause: error,
+      response = await this.fetchImpl(LINK_ISSUER_METADATA_URL, {
+        redirect: 'manual',
       });
+    } catch (error) {
+      throw new LinkTransportError(
+        `Request failed: GET ${LINK_ISSUER_METADATA_URL}`,
+        { cause: error },
+      );
     }
 
     const rawBody = await response.text();
@@ -75,26 +95,13 @@ export class CredentialsResource
       response.status,
       () => credentialIssuerMetadataSchema.parse(data),
     );
-    return this.parseResponse(
-      'validate issuer metadata',
-      response.status,
-      () => {
-        const metadataIssuerUrl = parseIssuerOrigin(metadata.issuer);
-        if (metadataIssuerUrl.origin !== issuerUrl.origin) {
-          throw new TypeError(
-            'issuer metadata identifier must match the discovery origin',
-          );
-        }
-        return requireIssuerEndpoint(
-          metadata.credential_endpoint,
-          issuerUrl.origin,
-          'credential_endpoint',
-        );
-      },
+    return this.parseResponse('validate issuer metadata', response.status, () =>
+      requireLinkEndpoint(metadata.credential_endpoint, 'credential_endpoint'),
     );
   }
 
   async issue(params: CredentialIssueParams): Promise<CredentialIssueResponse> {
+    const publicJwk = parseHolderPublicJwk(params.cnf.jwk);
     const endpoint = await this.discoverCredentialEndpoint();
     const send = async (forceRefresh = false): Promise<Response> => {
       const token = await this.getAccessToken(
@@ -109,7 +116,7 @@ export class CredentialsResource
             Accept: 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify(params),
+          body: JSON.stringify({ cnf: { jwk: publicJwk } }),
         });
       } catch (error) {
         throw new LinkTransportError(`Request failed: POST ${endpoint}`, {
