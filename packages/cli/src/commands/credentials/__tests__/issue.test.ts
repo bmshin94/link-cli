@@ -11,25 +11,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { loadHolderKey, loadOrCreateHolderKey } from '../holder-key';
 import { issueIdentityCredential } from '../issue';
 
-function publicJwkFromPrivate(type: 'ed25519' | 'p256'): {
-  privateJwk: Record<string, unknown>;
-  publicJwk: HolderPublicJwk;
-} {
-  const privateKey =
-    type === 'ed25519'
-      ? generateKeyPairSync('ed25519').privateKey
-      : generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
+function publicJwkFromPrivate(): HolderPublicJwk {
+  const privateKey = generateKeyPairSync('ed25519').privateKey;
   const jwk = privateKey.export({ format: 'jwk' }) as Record<string, string>;
-  if (type === 'ed25519') {
-    return {
-      privateJwk: jwk,
-      publicJwk: { kty: 'OKP', crv: 'Ed25519', x: jwk.x },
-    };
-  }
-  return {
-    privateJwk: jwk,
-    publicJwk: { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
-  };
+  return { kty: 'OKP', crv: 'Ed25519', x: jwk.x };
 }
 
 function encodeSegment(value: unknown): string {
@@ -108,7 +93,7 @@ describe('issueIdentityCredential', () => {
 
   it('rejects an issued credential whose cnf.jwk does not match', async () => {
     const keyFile = join(tempDir(), 'holder-key.jwk');
-    const other = publicJwkFromPrivate('ed25519').publicJwk;
+    const other = publicJwkFromPrivate();
     const resource: IIdentityCredentialsResource = {
       issue: vi.fn(async () => ({
         credential: compactCredential(other),
@@ -135,7 +120,7 @@ describe('loadHolderKey', () => {
 
   it('loads an existing managed key', () => {
     const keyFile = join(tempDir(), 'holder-key.jwk');
-    const created = loadOrCreateHolderKey(keyFile, 'ed25519');
+    const created = loadOrCreateHolderKey(keyFile);
     const loaded = loadHolderKey(keyFile);
     expect(statSync(keyFile).mode & 0o777).toBe(0o600);
     expect(loaded.created).toBe(false);
@@ -148,9 +133,7 @@ describe('loadHolderKey', () => {
     const keyFile = join(dir, 'holder-key.jwk');
     symlinkSync(target, keyFile);
 
-    expect(() => loadOrCreateHolderKey(keyFile, 'ed25519')).toThrow(
-      'symbolic link',
-    );
+    expect(() => loadOrCreateHolderKey(keyFile)).toThrow('symbolic link');
     expect(existsSync(target)).toBe(false);
   });
 });

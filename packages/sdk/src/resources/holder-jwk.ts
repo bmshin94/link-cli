@@ -10,10 +10,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * RFC 7638 SHA-256 thumbprint of a holder public JWK, base64url-encoded.
  */
 export function holderJwkThumbprint(jwk: HolderPublicJwk): string {
-  const canonical =
-    jwk.kty === 'OKP'
-      ? JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x })
-      : JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });
+  const canonical = JSON.stringify({
+    crv: jwk.crv,
+    kty: jwk.kty,
+    x: jwk.x,
+  });
   return createHash('sha256').update(canonical).digest('base64url');
 }
 
@@ -35,35 +36,15 @@ export function parseHolderPublicJwk(value: unknown): HolderPublicJwk {
     throw new LinkConfigurationError('Holder public key is missing kty');
   }
 
-  if (value.kty === 'OKP') {
-    if (
-      value.crv !== 'Ed25519' ||
-      typeof value.x !== 'string' ||
-      value.x.length === 0
-    ) {
-      throw new LinkConfigurationError(
-        'Holder public key must be an Ed25519 OKP JWK with an x member',
-      );
-    }
-    return { kty: 'OKP', crv: 'Ed25519', x: value.x };
+  if (
+    value.kty !== 'OKP' ||
+    value.crv !== 'Ed25519' ||
+    typeof value.x !== 'string' ||
+    value.x.length === 0
+  ) {
+    throw new LinkConfigurationError(
+      'Holder public key must be an Ed25519 OKP JWK with an x member',
+    );
   }
-
-  if (value.kty === 'EC') {
-    if (
-      value.crv !== 'P-256' ||
-      typeof value.x !== 'string' ||
-      value.x.length === 0 ||
-      typeof value.y !== 'string' ||
-      value.y.length === 0
-    ) {
-      throw new LinkConfigurationError(
-        'Holder public key must be a P-256 EC JWK with x and y members',
-      );
-    }
-    return { kty: 'EC', crv: 'P-256', x: value.x, y: value.y };
-  }
-
-  throw new LinkConfigurationError(
-    'Holder public key must use Ed25519 (OKP) or P-256 (EC)',
-  );
+  return { kty: 'OKP', crv: 'Ed25519', x: value.x };
 }

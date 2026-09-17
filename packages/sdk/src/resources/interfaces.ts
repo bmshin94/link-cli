@@ -38,9 +38,7 @@ export interface IAttestationsResource {
   request(params: AttestationRequestParams): Promise<AttestationRequestResult>;
 }
 
-export type HolderPublicJwk =
-  | { kty: 'OKP'; crv: 'Ed25519'; x: string }
-  | { kty: 'EC'; crv: 'P-256'; x: string; y: string };
+export type HolderPublicJwk = { kty: 'OKP'; crv: 'Ed25519'; x: string };
 
 export interface IssueIdentityCredentialParams {
   cnf: { jwk: HolderPublicJwk };

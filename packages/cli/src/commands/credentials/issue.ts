@@ -75,7 +75,7 @@ export async function issueIdentityCredential(options: {
     keyFile = DEFAULT_HOLDER_KEY_PATH,
     includeClaims = true,
   } = options;
-  const holderKey = loadOrCreateHolderKey(keyFile, 'ed25519');
+  const holderKey = loadOrCreateHolderKey(keyFile);
   const publicJwk = holderKey.publicJwk;
 
   const response = await resource.issue({

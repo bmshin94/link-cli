@@ -12,30 +12,12 @@ function ed25519PublicJwk(): { kty: 'OKP'; crv: 'Ed25519'; x: string } {
   return { kty: 'OKP', crv: 'Ed25519', x: jwk.x };
 }
 
-function p256PublicJwk(): {
-  kty: 'EC';
-  crv: 'P-256';
-  x: string;
-  y: string;
-} {
-  const { publicKey } = generateKeyPairSync('ec', {
-    namedCurve: 'prime256v1',
-  });
-  const jwk = publicKey.export({ format: 'jwk' }) as { x: string; y: string };
-  return { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y };
-}
-
 describe('parseHolderPublicJwk', () => {
   it('accepts an Ed25519 public JWK and strips extra members', () => {
     const jwk = ed25519PublicJwk();
     expect(
       parseHolderPublicJwk({ ...jwk, alg: 'EdDSA', kid: 'unused' }),
     ).toEqual(jwk);
-  });
-
-  it('accepts a P-256 public JWK', () => {
-    const jwk = p256PublicJwk();
-    expect(parseHolderPublicJwk(jwk)).toEqual(jwk);
   });
 
   it('normalizes a private JWK to its public members', () => {
@@ -45,8 +27,13 @@ describe('parseHolderPublicJwk', () => {
 
   it('rejects unsupported key types', () => {
     expect(() =>
-      parseHolderPublicJwk({ kty: 'RSA', n: 'n', e: 'AQAB' }),
-    ).toThrow('Ed25519 (OKP) or P-256 (EC)');
+      parseHolderPublicJwk({
+        kty: 'EC',
+        crv: 'P-256',
+        x: 'x',
+        y: 'y',
+      }),
+    ).toThrow('Ed25519 OKP');
   });
 });
 
