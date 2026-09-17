@@ -1,6 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { LinkConfigurationError } from '@/errors';
 import {
   holderJwksEqual,
   holderJwkThumbprint,
@@ -39,13 +38,9 @@ describe('parseHolderPublicJwk', () => {
     expect(parseHolderPublicJwk(jwk)).toEqual(jwk);
   });
 
-  it('rejects a private scalar', () => {
-    expect(() =>
-      parseHolderPublicJwk({ ...ed25519PublicJwk(), d: 'private' }),
-    ).toThrow(LinkConfigurationError);
-    expect(() =>
-      parseHolderPublicJwk({ ...ed25519PublicJwk(), d: 'private' }),
-    ).toThrow('private members');
+  it('normalizes a private JWK to its public members', () => {
+    const jwk = ed25519PublicJwk();
+    expect(parseHolderPublicJwk({ ...jwk, d: 'private' })).toEqual(jwk);
   });
 
   it('rejects unsupported key types', () => {

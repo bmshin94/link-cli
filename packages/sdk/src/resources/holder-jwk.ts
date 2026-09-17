@@ -25,17 +25,11 @@ export function holderJwksEqual(
 }
 
 /**
- * Accepts only Link's public Ed25519 or P-256 JWK members. Rejects private
- * scalars such as `d` and any remote key URL.
+ * Normalizes a supported holder JWK to its public members.
  */
 export function parseHolderPublicJwk(value: unknown): HolderPublicJwk {
   if (!isRecord(value)) {
     throw new LinkConfigurationError('Holder public key must be a JWK object');
-  }
-  if (value.d !== undefined) {
-    throw new LinkConfigurationError(
-      'Holder public key must not include private members such as "d"',
-    );
   }
   if (typeof value.kty !== 'string') {
     throw new LinkConfigurationError('Holder public key is missing kty');

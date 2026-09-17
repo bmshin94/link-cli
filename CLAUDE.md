@@ -149,14 +149,12 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 
 Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENTITY_COMMANDS=1` (or `true`). Even when enabled, the command sets `mcp: false` so MCP clients do not see it.
 
-`identity credentials get [--key-file <path>] [--public-key-file <path>] [--key-type ed25519|p256] [--output-file <path>] [--force] [--access-token <t>]` — gets signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Agent-only output. The SDK discovers and calls `credential_endpoint`; the CLI owns local key persistence, public-key-only issuance, claim decoding, schema, and command registration under `packages/cli/src/commands/identity/`.
+`identity credentials get [--public-key-file <path>] [--access-token <t>]` — gets signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Agent-only output. The SDK discovers and calls `credential_endpoint`; the CLI owns default holder-key persistence, public-key-only issuance, claim decoding, schema, and command registration under `packages/cli/src/commands/identity/`.
 
 - Discovery uses `GET https://api.link.com/.well-known/aap-issuer`. The metadata issuer must be exactly `https://api.link.com`, and `credential_endpoint` must remain on that HTTPS origin. `LINK_API_BASE_URL` does not change the credential issuer.
-- `POST <credential_endpoint>` sends `{"cnf":{"jwk":<public JWK>}}`. Only the public Ed25519 or P-256 members are sent. Private members such as `d` are rejected.
-- Resolve the key source before applying defaults. `--public-key-file` issues to a caller-supplied public JWK and must not open, create, or overwrite a private-key file. `--key-file` and `--public-key-file` conflict. `--key-type` applies only to managed-key generation.
-- Managed issuance atomically persists the private key at `--key-file` (default `~/.link/holder-key.jwk`, mode 0600) and refuses symbolic-link paths. External issuance records `holder.ownership: "external"` with the public JWK and RFC 7638 thumbprint, and no local private-key path.
-- `--output-file` writes the versioned credential artifact as JSON (0600; `--force` to overwrite). The issued `cnf.jwk` is checked against the requested public key before returning.
-- Requires `userinfo:read` and `payment_methods.agentic`; no additional OAuth scope is required.
+- `POST <credential_endpoint>` sends `{"cnf":{"jwk":<public JWK>}}`.
+- Managed issuance uses the Ed25519 holder key at `~/.link/holder-key.jwk` (mode 0600). `--public-key-file` instead issues to a caller-supplied public JWK without creating a local key.
+- The issued `cnf.jwk` is checked against the requested public key before returning the credential artifact.
 
 ### serve command
 

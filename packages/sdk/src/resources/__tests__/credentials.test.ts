@@ -160,17 +160,27 @@ describe('CredentialsResource', () => {
     ).rejects.toBeInstanceOf(LinkResponseError);
   });
 
-  it('rejects private JWK members before any network request', async () => {
-    const getAccessToken = vi.fn(async () => 'secret');
+  it('sends only public JWK members', async () => {
     const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        jsonResponse({
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('/.well-known/aap-issuer')) {
+          return jsonResponse({
+            issuer: 'https://api.link.com',
+            credential_endpoint: 'https://api.link.com/credential',
+          });
+        }
+        expect(JSON.parse(String(init?.body))).toEqual({
+          cnf: { jwk: PUBLIC_JWK },
+        });
+        return jsonResponse({
+          credential: 'issuer-jwt~',
           issuer: 'https://api.link.com',
-          credential_endpoint: 'https://api.link.com/credential',
-        }),
+          expires_at: '2026-08-25T00:00:00Z',
+        });
+      },
     );
     const resource = new CredentialsResource({
-      getAccessToken,
+      accessToken: 'access-token',
       fetch: fetchMock,
     });
 
@@ -178,9 +188,8 @@ describe('CredentialsResource', () => {
       resource.issue({
         cnf: { jwk: { ...PUBLIC_JWK, d: 'private' } as never },
       }),
-    ).rejects.toThrow('must not include private members');
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(getAccessToken).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ issuer: 'https://api.link.com' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('refreshes LinkOptions authentication after a credential 401', async () => {

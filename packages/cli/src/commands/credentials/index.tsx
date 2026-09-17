@@ -21,7 +21,7 @@ export function createCredentialsCli(
     mcp: false,
     outputPolicy: 'agent-only' as const,
     async run(c) {
-      const { outputFile, force, accessToken, ...keyOptions } = c.options;
+      const { accessToken, ...keyOptions } = c.options;
 
       let source: ReturnType<typeof resolveCredentialKeySource>;
       try {
@@ -52,22 +52,6 @@ export function createCredentialsCli(
         });
       }
 
-      if (outputFile) {
-        const { writeCredentialFile } = await import(
-          '../../utils/credential-output'
-        );
-        try {
-          await writeCredentialFile(outputFile, result, force);
-        } catch (error) {
-          const message = (error as Error).message;
-          const code = message.startsWith('OUTPUT_FILE_EXISTS')
-            ? 'OUTPUT_FILE_EXISTS'
-            : message.startsWith('OUTPUT_FILE_SYMLINK')
-              ? 'OUTPUT_FILE_SYMLINK'
-              : 'OUTPUT_FILE_WRITE_ERROR';
-          return c.error({ code, message });
-        }
-      }
       return result;
     },
   });

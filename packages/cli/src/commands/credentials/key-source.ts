@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { parseHolderPublicJwk } from '@stripe/link-sdk';
-import { DEFAULT_HOLDER_KEY_PATH, type HolderKeyType } from './holder-key';
+import { DEFAULT_HOLDER_KEY_PATH } from './holder-key';
 import type { CredentialKeySource } from './issue';
 
 export class CredentialKeySourceError extends Error {
@@ -8,9 +8,7 @@ export class CredentialKeySourceError extends Error {
 }
 
 export interface CredentialKeySourceOptions {
-  keyFile?: string;
   publicKeyFile?: string;
-  keyType?: HolderKeyType;
 }
 
 /**
@@ -20,18 +18,7 @@ export interface CredentialKeySourceOptions {
 export function resolveCredentialKeySource(
   options: CredentialKeySourceOptions,
 ): CredentialKeySource {
-  const { keyFile, publicKeyFile, keyType } = options;
-
-  if (publicKeyFile && keyFile) {
-    throw new CredentialKeySourceError(
-      'Pass either --public-key-file or --key-file, not both.',
-    );
-  }
-  if (publicKeyFile && keyType) {
-    throw new CredentialKeySourceError(
-      '--key-type applies only when generating a CLI-managed holder key.',
-    );
-  }
+  const { publicKeyFile } = options;
 
   if (publicKeyFile) {
     let parsed: unknown;
@@ -50,7 +37,7 @@ export function resolveCredentialKeySource(
 
   return {
     kind: 'managed',
-    keyFile: keyFile ?? DEFAULT_HOLDER_KEY_PATH,
-    keyType: keyType ?? 'ed25519',
+    keyFile: DEFAULT_HOLDER_KEY_PATH,
+    keyType: 'ed25519',
   };
 }

@@ -11,7 +11,11 @@ import { join } from 'node:path';
 import type { HolderPublicJwk, ICredentialsResource } from '@stripe/link-sdk';
 import { holderJwkThumbprint } from '@stripe/link-sdk';
 import { describe, expect, it, vi } from 'vitest';
-import { loadHolderKey, loadOrCreateHolderKey } from '../holder-key';
+import {
+  DEFAULT_HOLDER_KEY_PATH,
+  loadHolderKey,
+  loadOrCreateHolderKey,
+} from '../holder-key';
 import { issueCredential } from '../issue';
 import { resolveCredentialKeySource } from '../key-source';
 
@@ -73,22 +77,12 @@ describe('resolveCredentialKeySource', () => {
     });
   });
 
-  it('rejects public-key and private-key flags together', () => {
-    expect(() =>
-      resolveCredentialKeySource({
-        publicKeyFile: '/tmp/public.jwk',
-        keyFile: '/tmp/holder.jwk',
-      }),
-    ).toThrow('not both');
-  });
-
-  it('rejects --key-type with a public-key file', () => {
-    expect(() =>
-      resolveCredentialKeySource({
-        publicKeyFile: '/tmp/public.jwk',
-        keyType: 'p256',
-      }),
-    ).toThrow('--key-type');
+  it('uses the default managed holder key when no public key is supplied', () => {
+    expect(resolveCredentialKeySource({})).toEqual({
+      kind: 'managed',
+      keyFile: DEFAULT_HOLDER_KEY_PATH,
+      keyType: 'ed25519',
+    });
   });
 });
 

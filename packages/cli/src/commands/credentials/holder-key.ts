@@ -59,8 +59,8 @@ function readHolderKeyFile(path: string): string {
 function toPublicJwk(privateKey: KeyObject): HolderPublicJwk {
   const jwk = privateKey.export({ format: 'jwk' }) as Record<string, string>;
 
-  // Strip everything but the members the issuer allows — notably `d`, the
-  // private scalar, which must never leave the local key file.
+  // Export only the public members so the private scalar never leaves the
+  // local key file.
   if (jwk.kty === 'OKP') {
     return { kty: 'OKP', crv: 'Ed25519', x: jwk.x };
   }
