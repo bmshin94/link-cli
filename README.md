@@ -250,7 +250,7 @@ All commands accept `--auth <path>` to store auth credentials in a specific file
 
 Unlisted commands: set `LINK_IDENTITY_COMMANDS=1` to enable them. They are omitted from `--help`, `--llms`, and MCP tool lists otherwise.
 
-Privacy-preserving tokens that show Link attests to your agent:
+**Privacy-preserving tokens** that show Link attests to your agent:
 
 ```bash
 LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10
@@ -258,14 +258,14 @@ LINK_IDENTITY_COMMANDS=1 link-cli identity attestations request --count 10
 
 Attestation tokens can be used to respond to attestation challenges presented by downstream services. Token artifacts are written to `~/.link-cli/attestations`.
 
-User info that has been signed, proving it comes from Link:
+**User info that has been signed, proving it comes from Link**:
 
 ```bash
 LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get
 LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get --public-key-file ./holder-public.jwk
 ```
 
-`identity credentials get` fetches that signed user info and returns the issued credential artifact. By default, the CLI keeps its holder key at `~/.link/holder-key.jwk` so it can present the same wallet of claims later. With `--public-key-file`, the CLI issues to that public JWK instead, and the agent retains the matching private key and signs presentations itself. The issuer is fixed to `https://api.link.com`; its metadata tells the CLI which same-origin credential endpoint to call.
+`identity credentials get` returns a signed credential bound to the default holder key at `~/.link/holder-key.jwk`; use `--public-key-file` to bind it to an externally managed key instead.
 
 ### Spend request lifecycle
 

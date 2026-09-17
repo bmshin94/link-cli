@@ -8,7 +8,7 @@ import {
 import { getOptions } from './schema';
 
 export function createCredentialsCli(
-  createResource: (accessToken?: string) => ICredentialsResource,
+  createResource: () => ICredentialsResource,
 ) {
   const cli = Cli.create('credentials', {
     description: 'User info that has been signed, proving it comes from Link.',
@@ -21,11 +21,9 @@ export function createCredentialsCli(
     mcp: false,
     outputPolicy: 'agent-only' as const,
     async run(c) {
-      const { accessToken, ...keyOptions } = c.options;
-
       let source: ReturnType<typeof resolveCredentialKeySource>;
       try {
-        source = resolveCredentialKeySource(keyOptions);
+        source = resolveCredentialKeySource(c.options);
       } catch (error) {
         return c.error({
           code:
@@ -39,7 +37,7 @@ export function createCredentialsCli(
       let result: Awaited<ReturnType<typeof issueCredential>>;
       try {
         result = await issueCredential({
-          resource: createResource(accessToken),
+          resource: createResource(),
           source,
         });
       } catch (error) {

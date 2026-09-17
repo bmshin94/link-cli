@@ -72,10 +72,6 @@ interface ResourceFactoryOptions {
   fetch?: typeof globalThis.fetch;
 }
 
-type SdkAuthentication =
-  | { accessToken: string; getAccessToken?: never }
-  | { accessToken?: never; getAccessToken: AccessTokenProvider };
-
 function createProxyFetch(
   baseFetch: typeof globalThis.fetch,
   proxyUrl: string,
@@ -142,11 +138,11 @@ export class ResourceFactory {
     this._authResource = options.authResource;
   }
 
-  private createSdkOptions(authentication: SdkAuthentication): LinkOptions {
+  private createSdkOptions(getAccessToken: AccessTokenProvider): LinkOptions {
     return {
       verbose: this.verbose,
       defaultHeaders: this.defaultHeaders,
-      ...authentication,
+      getAccessToken,
       apiBaseUrl: this.apiBaseUrl,
       spendRequestBaseUrl: this.spendRequestBaseUrl,
       fetch: this.fetch,
@@ -222,9 +218,7 @@ export class ResourceFactory {
   private createSdkClient(): Link {
     if (!this.sdkClient) {
       this.sdkClient = new Link(
-        this.createSdkOptions({
-          getAccessToken: this.createSdkAccessTokenProvider(),
-        }),
+        this.createSdkOptions(this.createSdkAccessTokenProvider()),
       );
     }
     return this.sdkClient;
@@ -240,12 +234,7 @@ export class ResourceFactory {
     return resource;
   }
 
-  createCredentialsResource(accessToken?: string): ICredentialsResource {
-    if (accessToken !== undefined) {
-      return sanitizeResource(
-        new Link(this.createSdkOptions({ accessToken })).credentials,
-      );
-    }
+  createCredentialsResource(): ICredentialsResource {
     if (this.credentialsResource) {
       return this.credentialsResource;
     }

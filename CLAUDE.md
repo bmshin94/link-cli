@@ -149,7 +149,7 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 
 Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENTITY_COMMANDS=1` (or `true`). Even when enabled, the command sets `mcp: false` so MCP clients do not see it.
 
-`identity credentials get [--public-key-file <path>] [--access-token <t>]` — gets signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Agent-only output. The SDK discovers and calls `credential_endpoint`; the CLI owns default holder-key persistence, public-key-only issuance, claim decoding, schema, and command registration under `packages/cli/src/commands/identity/`.
+`identity credentials get [--public-key-file <path>]` — gets signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Agent-only output. The SDK discovers and calls `credential_endpoint`; the CLI owns default holder-key persistence, public-key-only issuance, claim decoding, schema, and command registration under `packages/cli/src/commands/identity/`.
 
 - Discovery uses `GET https://api.link.com/.well-known/aap-issuer`. The metadata issuer must be exactly `https://api.link.com`, and `credential_endpoint` must remain on that HTTPS origin. `LINK_API_BASE_URL` does not change the credential issuer.
 - `POST <credential_endpoint>` sends `{"cnf":{"jwk":<public JWK>}}`.
