@@ -42,18 +42,20 @@ export type HolderPublicJwk =
   | { kty: 'OKP'; crv: 'Ed25519'; x: string }
   | { kty: 'EC'; crv: 'P-256'; x: string; y: string };
 
-export interface CredentialIssueParams {
+export interface IssueIdentityCredentialParams {
   cnf: { jwk: HolderPublicJwk };
 }
 
-export interface CredentialIssueResponse {
+export interface IssueIdentityCredentialResponse {
   credential: string;
   issuer: string;
   expires_at: string;
 }
 
-export interface ICredentialsResource {
-  issue(params: CredentialIssueParams): Promise<CredentialIssueResponse>;
+export interface IIdentityCredentialsResource {
+  issue(
+    params: IssueIdentityCredentialParams,
+  ): Promise<IssueIdentityCredentialResponse>;
 }
 
 export interface CreateSpendRequestParams {

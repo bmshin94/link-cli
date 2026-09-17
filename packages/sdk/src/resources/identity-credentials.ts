@@ -4,20 +4,20 @@ import { LinkApiError, LinkResponseError, LinkTransportError } from '@/errors';
 import { BaseResource } from '@/resources/base';
 import { parseHolderPublicJwk } from '@/resources/holder-jwk';
 import type {
-  CredentialIssueParams,
-  CredentialIssueResponse,
-  ICredentialsResource,
+  IIdentityCredentialsResource,
+  IssueIdentityCredentialParams,
+  IssueIdentityCredentialResponse,
 } from '@/resources/interfaces';
 
 const LINK_ISSUER = 'https://api.link.com';
 const LINK_ISSUER_METADATA_URL = `${LINK_ISSUER}/.well-known/aap-issuer`;
 
-const credentialIssuerMetadataSchema = z.looseObject({
+const identityCredentialIssuerMetadataSchema = z.looseObject({
   issuer: z.literal(LINK_ISSUER),
   credential_endpoint: z.string(),
 });
 
-const credentialIssueResponseSchema = z.looseObject({
+const issueIdentityCredentialResponseSchema = z.looseObject({
   credential: z.string(),
   issuer: z.literal(LINK_ISSUER),
   expires_at: z.string(),
@@ -42,9 +42,9 @@ function requireLinkEndpoint(value: string, field: string): string {
   return url.href;
 }
 
-export class CredentialsResource
+export class IdentityCredentialsResource
   extends BaseResource
-  implements ICredentialsResource
+  implements IIdentityCredentialsResource
 {
   constructor(options: LinkOptions) {
     super(options, '');
@@ -93,14 +93,16 @@ export class CredentialsResource
     const metadata = this.parseResponse(
       'parse issuer metadata',
       response.status,
-      () => credentialIssuerMetadataSchema.parse(data),
+      () => identityCredentialIssuerMetadataSchema.parse(data),
     );
     return this.parseResponse('validate issuer metadata', response.status, () =>
       requireLinkEndpoint(metadata.credential_endpoint, 'credential_endpoint'),
     );
   }
 
-  async issue(params: CredentialIssueParams): Promise<CredentialIssueResponse> {
+  async issue(
+    params: IssueIdentityCredentialParams,
+  ): Promise<IssueIdentityCredentialResponse> {
     const publicJwk = parseHolderPublicJwk(params.cnf.jwk);
     const endpoint = await this.discoverCredentialEndpoint();
     const send = async (forceRefresh = false): Promise<Response> => {
@@ -153,7 +155,7 @@ export class CredentialsResource
     }
 
     return this.parseResponse('issue credential', response.status, () =>
-      credentialIssueResponseSchema.parse(data),
+      issueIdentityCredentialResponseSchema.parse(data),
     );
   }
 }

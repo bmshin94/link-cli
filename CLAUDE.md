@@ -41,7 +41,7 @@ node packages/cli/dist/cli.js <command>
 
 Defined in `packages/sdk/src/resources/interfaces.ts`:
 - `IAttestationsResource` — Privacy Pass Blind RSA token issuance
-- `ICredentialsResource` — signed user info issuance
+- `IIdentityCredentialsResource` — signed user info issuance
 - `ISpendRequestResource` — CRUD + request-approval for spend requests
 
 The SDK only accepts credentials. Device authorization, refresh-token

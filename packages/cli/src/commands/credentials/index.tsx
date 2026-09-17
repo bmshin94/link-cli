@@ -1,9 +1,12 @@
-import { type ICredentialsResource, LinkSdkError } from '@stripe/link-sdk';
+import {
+  type IIdentityCredentialsResource,
+  LinkSdkError,
+} from '@stripe/link-sdk';
 import { Cli } from 'incur';
-import { issueCredential } from './issue';
+import { issueIdentityCredential } from './issue';
 
-export function createCredentialsCli(
-  createResource: () => ICredentialsResource,
+export function createIdentityCredentialsCli(
+  createResource: () => IIdentityCredentialsResource,
 ) {
   const cli = Cli.create('credentials', {
     description: 'User info that has been signed, proving it comes from Link.',
@@ -15,9 +18,9 @@ export function createCredentialsCli(
     mcp: false,
     outputPolicy: 'agent-only' as const,
     async run(c) {
-      let result: Awaited<ReturnType<typeof issueCredential>>;
+      let result: Awaited<ReturnType<typeof issueIdentityCredential>>;
       try {
-        result = await issueCredential({
+        result = await issueIdentityCredential({
           resource: createResource(),
         });
       } catch (error) {

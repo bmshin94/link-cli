@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LinkResponseError } from '@/errors';
-import { CredentialsResource } from '@/resources/credentials';
+import { IdentityCredentialsResource } from '@/resources/identity-credentials';
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -15,7 +15,7 @@ const PUBLIC_JWK = {
   x: 'public-key',
 };
 
-describe('CredentialsResource', () => {
+describe('IdentityCredentialsResource', () => {
   it('issues through the discovered credential endpoint', async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -40,7 +40,7 @@ describe('CredentialsResource', () => {
         });
       },
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       apiBaseUrl: 'https://attacker.example',
       accessToken: 'access-token',
       fetch: fetchMock,
@@ -64,7 +64,7 @@ describe('CredentialsResource', () => {
           credential_endpoint: 'https://api.link.com/credential',
         }),
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       getAccessToken,
       fetch: fetchMock,
     });
@@ -85,7 +85,7 @@ describe('CredentialsResource', () => {
           credential_endpoint: 'https://attacker.example/credential',
         }),
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       getAccessToken,
       fetch: fetchMock,
     });
@@ -105,7 +105,7 @@ describe('CredentialsResource', () => {
           headers: { Location: 'https://attacker.example/metadata' },
         }),
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -126,7 +126,7 @@ describe('CredentialsResource', () => {
             })
           : jsonResponse({ credential: 42 }),
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -150,7 +150,7 @@ describe('CredentialsResource', () => {
               expires_at: '2026-08-25T00:00:00Z',
             }),
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -179,7 +179,7 @@ describe('CredentialsResource', () => {
         });
       },
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       accessToken: 'access-token',
       fetch: fetchMock,
     });
@@ -206,7 +206,7 @@ describe('CredentialsResource', () => {
       ({ forceRefresh }: { forceRefresh?: boolean } = {}) =>
         forceRefresh ? 'refreshed-token' : 'initial-token',
     );
-    const resource = new CredentialsResource({
+    const resource = new IdentityCredentialsResource({
       getAccessToken,
       fetch: fetchMock,
     });

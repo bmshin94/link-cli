@@ -2,11 +2,14 @@ import { generateKeyPairSync } from 'node:crypto';
 import { existsSync, mkdtempSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { HolderPublicJwk, ICredentialsResource } from '@stripe/link-sdk';
+import type {
+  HolderPublicJwk,
+  IIdentityCredentialsResource,
+} from '@stripe/link-sdk';
 import { holderJwkThumbprint } from '@stripe/link-sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { loadHolderKey, loadOrCreateHolderKey } from '../holder-key';
-import { issueCredential } from '../issue';
+import { issueIdentityCredential } from '../issue';
 
 function publicJwkFromPrivate(type: 'ed25519' | 'p256'): {
   privateJwk: Record<string, unknown>;
@@ -53,11 +56,11 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'link-credential-'));
 }
 
-describe('issueCredential', () => {
+describe('issueIdentityCredential', () => {
   it('issues a managed credential and records the local key path', async () => {
     const dir = tempDir();
     const keyFile = join(dir, 'holder-key.jwk');
-    const resource: ICredentialsResource = {
+    const resource: IIdentityCredentialsResource = {
       issue: vi.fn(async ({ cnf }) => ({
         credential: compactCredential(cnf.jwk),
         issuer: 'https://api.link.com',
@@ -65,7 +68,7 @@ describe('issueCredential', () => {
       })),
     };
 
-    const result = await issueCredential({
+    const result = await issueIdentityCredential({
       resource,
       keyFile,
     });
@@ -85,7 +88,7 @@ describe('issueCredential', () => {
 
   it('sanitizes disclosed claims before returning them to the CLI', async () => {
     const keyFile = join(tempDir(), 'holder-key.jwk');
-    const resource: ICredentialsResource = {
+    const resource: IIdentityCredentialsResource = {
       issue: vi.fn(async ({ cnf }) => ({
         credential: compactCredential(cnf.jwk, {
           email: '\u001b[2Juser@example.com\u0007',
@@ -95,7 +98,7 @@ describe('issueCredential', () => {
       })),
     };
 
-    const result = await issueCredential({
+    const result = await issueIdentityCredential({
       resource,
       keyFile,
     });
@@ -106,7 +109,7 @@ describe('issueCredential', () => {
   it('rejects an issued credential whose cnf.jwk does not match', async () => {
     const keyFile = join(tempDir(), 'holder-key.jwk');
     const other = publicJwkFromPrivate('ed25519').publicJwk;
-    const resource: ICredentialsResource = {
+    const resource: IIdentityCredentialsResource = {
       issue: vi.fn(async () => ({
         credential: compactCredential(other),
         issuer: 'https://api.link.com',
@@ -115,7 +118,7 @@ describe('issueCredential', () => {
     };
 
     await expect(
-      issueCredential({
+      issueIdentityCredential({
         resource,
         keyFile,
       }),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import Link from '@/client';
 import { AttestationsResource } from '@/resources/attestations';
-import { CredentialsResource } from '@/resources/credentials';
+import { IdentityCredentialsResource } from '@/resources/identity-credentials';
 import { PaymentMethodsResource } from '@/resources/payment-methods';
 import { ReportResource } from '@/resources/report';
 import { SpendRequestResource } from '@/resources/spend-request';
@@ -17,7 +17,9 @@ describe('Link', () => {
     });
 
     expect(client.attestations).toBeInstanceOf(AttestationsResource);
-    expect(client.credentials).toBeInstanceOf(CredentialsResource);
+    expect(client.identityCredentials).toBeInstanceOf(
+      IdentityCredentialsResource,
+    );
     expect(client.spendRequests).toBeInstanceOf(SpendRequestResource);
     expect(client.paymentMethods).toBeInstanceOf(PaymentMethodsResource);
     expect(client.transactions).toBeInstanceOf(TransactionsResource);
@@ -27,7 +29,7 @@ describe('Link', () => {
     expect(client.spendRequests.update).toBeTypeOf('function');
     expect(client.spendRequests.retrieve).toBeTypeOf('function');
     expect(client.attestations.request).toBeTypeOf('function');
-    expect(client.credentials.issue).toBeTypeOf('function');
+    expect(client.identityCredentials.issue).toBeTypeOf('function');
     expect(client.paymentMethods.list).toBeTypeOf('function');
     expect(client.transactions.list).toBeTypeOf('function');
   });

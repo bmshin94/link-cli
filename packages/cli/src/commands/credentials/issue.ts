@@ -2,27 +2,27 @@ import {
   type HolderPublicJwk,
   holderJwksEqual,
   holderJwkThumbprint,
-  type ICredentialsResource,
+  type IIdentityCredentialsResource,
   parseHolderPublicJwk,
 } from '@stripe/link-sdk';
 import { sanitizeDeep } from '../../utils/sanitize-text';
 import { DEFAULT_HOLDER_KEY_PATH, loadOrCreateHolderKey } from './holder-key';
 
-export const CREDENTIAL_ARTIFACT_VERSION = 1 as const;
+export const IDENTITY_CREDENTIAL_ARTIFACT_VERSION = 1 as const;
 
-export interface CredentialHolder {
+export interface IdentityCredentialHolder {
   jwk: HolderPublicJwk;
   thumbprint: string;
   path: string;
   created: boolean;
 }
 
-export interface CredentialIssueResult {
-  version: typeof CREDENTIAL_ARTIFACT_VERSION;
+export interface IdentityCredentialIssueResult {
+  version: typeof IDENTITY_CREDENTIAL_ARTIFACT_VERSION;
   credential: string;
   issuer: string;
   expires_at: string;
-  holder: CredentialHolder;
+  holder: IdentityCredentialHolder;
   /** Claim names and values recovered from disclosures. Inspection only. */
   claims?: Record<string, unknown>;
 }
@@ -65,11 +65,11 @@ function credentialHolderJwk(credential: string): HolderPublicJwk {
   return parseHolderPublicJwk(payload.cnf.jwk);
 }
 
-export async function issueCredential(options: {
-  resource: ICredentialsResource;
+export async function issueIdentityCredential(options: {
+  resource: IIdentityCredentialsResource;
   keyFile?: string;
   includeClaims?: boolean;
-}): Promise<CredentialIssueResult> {
+}): Promise<IdentityCredentialIssueResult> {
   const {
     resource,
     keyFile = DEFAULT_HOLDER_KEY_PATH,
@@ -89,7 +89,7 @@ export async function issueCredential(options: {
   }
 
   return {
-    version: CREDENTIAL_ARTIFACT_VERSION,
+    version: IDENTITY_CREDENTIAL_ARTIFACT_VERSION,
     credential: response.credential,
     issuer: response.issuer,
     expires_at: response.expires_at,

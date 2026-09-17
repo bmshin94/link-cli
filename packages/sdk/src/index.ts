@@ -8,7 +8,6 @@ export {
   LinkTransportError,
 } from './errors';
 export * from './resources/attestations';
-export * from './resources/credentials';
 export {
   holderJwksEqual,
   holderJwkThumbprint,
