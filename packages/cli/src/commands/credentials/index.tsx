@@ -3,7 +3,10 @@ import {
   LinkSdkError,
 } from '@stripe/link-sdk';
 import { Cli } from 'incur';
+import { renderInteractive } from '../../utils/render-interactive';
+import { SavedArtifact } from '../identity/saved-artifact';
 import { issueIdentityCredential } from './issue';
+import { writeIdentityCredentialArtifact } from './storage';
 
 export function createIdentityCredentialsCli(
   createResource: () => IIdentityCredentialsResource,
@@ -19,10 +22,12 @@ export function createIdentityCredentialsCli(
     outputPolicy: 'agent-only' as const,
     async run(c) {
       let result: Awaited<ReturnType<typeof issueIdentityCredential>>;
+      let outputFile: string;
       try {
         result = await issueIdentityCredential({
           resource: createResource(),
         });
+        outputFile = await writeIdentityCredentialArtifact(result);
       } catch (error) {
         if (error instanceof LinkSdkError) {
           throw error;
@@ -33,7 +38,27 @@ export function createIdentityCredentialsCli(
         });
       }
 
-      return result;
+      if (
+        c.agent ||
+        c.formatExplicit ||
+        process.argv.includes('--full-output')
+      ) {
+        return { ...result, output_file: outputFile };
+      }
+
+      const humanResult = {
+        message: 'Identity credential saved',
+        output_file: outputFile,
+        expires_at: result.expires_at,
+      };
+      return renderInteractive(
+        <SavedArtifact
+          message={humanResult.message}
+          outputFile={outputFile}
+          details={[{ label: 'Expires', value: result.expires_at }]}
+        />,
+        () => humanResult,
+      );
     },
   });
 
