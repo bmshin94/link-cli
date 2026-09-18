@@ -261,10 +261,10 @@ Attestation tokens can be used to respond to attestation challenges presented by
 **User info that has been signed, proving it comes from Link**:
 
 ```bash
-LINK_IDENTITY_COMMANDS=1 link-cli identity credentials get
+LINK_IDENTITY_COMMANDS=1 link-cli identity credentials request
 ```
 
-`identity credentials get` returns a signed credential bound to the CLI-managed holder key at `~/.link/holder-key.jwk`.
+`identity credentials request` returns a signed credential bound to the CLI-managed holder key at `~/.link/holder-key.jwk`.
 
 ### Spend request lifecycle
 

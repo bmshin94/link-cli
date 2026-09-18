@@ -58,7 +58,7 @@ Commands in `packages/cli/src/cli.tsx` (incur framework). Each has two output mo
 - **Interactive** (default): Ink/React components from `packages/cli/src/commands/`
 - **JSON** (`--format json`): JSON to stdout, errors as JSON with `code` and `message` fields with exit code 1
 
-Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `identity attestations request`, `identity credentials get`, `report`, `serve`.
+Commands: `auth login|logout|status`, `user-info retrieve`, `spend-request create|update|retrieve|request-approval|cancel`, `payment-methods list`, `shipping-address list`, `mpp pay|decode`, `identity attestations request`, `identity credentials request`, `report`, `serve`.
 
 The CLI also runs as an MCP server (`--mcp`) and serves skill files via `skills` subcommand, both provided by incur.
 
@@ -149,7 +149,7 @@ Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENT
 
 Unlisted: omitted from `--help`, `--llms`, and MCP tool lists unless `LINK_IDENTITY_COMMANDS=1` (or `true`). Even when enabled, the command sets `mcp: false` so MCP clients do not see it.
 
-`identity credentials get` — gets signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Agent-only output. The SDK discovers and calls `credential_endpoint`; the CLI owns default holder-key persistence, claim decoding, and command registration under `packages/cli/src/commands/identity/`.
+`identity credentials request` — requests signed user info proving it comes from Link (a wallet of claims such as name, email, and phone). Human TTY runs save the credential and show its path; structured output returns the credential and holder-key path. The SDK discovers and calls `credential_endpoint`; the CLI owns default holder-key persistence, claim decoding, and command registration under `packages/cli/src/commands/identity/`.
 
 - Discovery uses `GET https://api.link.com/.well-known/aap-issuer`. The metadata issuer must be exactly `https://api.link.com`, and `credential_endpoint` must remain on that HTTPS origin. `LINK_API_BASE_URL` does not change the credential issuer.
 - `POST <credential_endpoint>` sends `{"cnf":{"jwk":<public JWK>}}`.

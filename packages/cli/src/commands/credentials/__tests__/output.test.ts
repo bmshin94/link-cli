@@ -94,7 +94,7 @@ async function run(
 }
 
 it('prints a non-secret TTY confirmation and saves the credential', async () => {
-  const output = await run(credentialCli(), ['get']);
+  const output = await run(credentialCli(), ['request']);
 
   expect(output).toBe('');
   expect(state.interactiveElements).toHaveLength(1);
@@ -105,7 +105,9 @@ it('prints a non-secret TTY confirmation and saves the credential', async () => 
   }>;
   expect(view.type).toBe(SavedArtifact);
   expect(view.props.message).toBe('Identity credential saved');
-  expect(view.props.outputFile).toContain('.link-cli/credentials/credential-');
+  expect(view.props.outputFile).toContain(
+    '.link-cli/credentials/current.json',
+  );
   expect(view.props.details).toEqual([
     { label: 'Expires', value: '2026-09-18T00:00:00Z' },
   ]);
@@ -129,7 +131,7 @@ it('prints a non-secret TTY confirmation and saves the credential', async () => 
 });
 
 it('returns the credential with an explicit format or non-TTY output', async () => {
-  expect(await run(credentialCli(), ['get', '--format', 'json'])).toContain(
+  expect(await run(credentialCli(), ['request', '--format', 'json'])).toContain(
     '"credential"',
   );
 
@@ -137,12 +139,17 @@ it('returns the credential with an explicit format or non-TTY output', async () 
     configurable: true,
     value: false,
   });
-  expect(await run(credentialCli(), ['get'])).toContain('.sig~');
+  expect(await run(credentialCli(), ['request'])).toContain('.sig~');
 });
 
 it('preserves the credential in a requested full-output envelope', async () => {
   const output = JSON.parse(
-    await run(credentialCli(), ['get', '--full-output', '--format', 'json']),
+    await run(credentialCli(), [
+      'request',
+      '--full-output',
+      '--format',
+      'json',
+    ]),
   );
 
   expect(output.ok).toBe(true);
@@ -150,7 +157,7 @@ it('preserves the credential in a requested full-output envelope', async () => {
   expect(output.data.holder.path).toBe(
     path.join(state.directory, 'holder-key.jwk'),
   );
-  expect(await run(credentialCli(), ['get', '--full-output'])).toContain(
+  expect(await run(credentialCli(), ['request', '--full-output'])).toContain(
     'credential:',
   );
 });
