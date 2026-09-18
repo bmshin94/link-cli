@@ -31,14 +31,17 @@ describe('identity credential artifact storage', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates unique artifacts in a private directory', async () => {
+  it('atomically replaces the current artifact in a private directory', async () => {
     const directory = path.join(tmpDir, '.link-cli', 'credentials');
     const first = await writeIdentityCredentialArtifact(artifact);
-    const second = await writeIdentityCredentialArtifact(artifact);
+    const replacement = { ...artifact, credential: 'replacement' };
+    const second = await writeIdentityCredentialArtifact(replacement);
 
-    expect(first).not.toBe(second);
+    expect(first).toBe(second);
+    expect(path.basename(first)).toBe('current.json');
     expect(path.dirname(first)).toBe(directory);
-    expect(JSON.parse(await fs.readFile(first, 'utf8'))).toEqual(artifact);
+    expect(JSON.parse(await fs.readFile(first, 'utf8'))).toEqual(replacement);
+    expect(await fs.readdir(directory)).toEqual(['current.json']);
     expect((await fs.stat(directory)).mode & 0o777).toBe(0o700);
     expect((await fs.stat(first)).mode & 0o777).toBe(0o600);
   });

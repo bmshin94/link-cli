@@ -1,8 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { writeCredentialFile } from '../../utils/credential-output';
+import Conf from 'conf';
 import type { IdentityCredentialIssueResult } from './issue';
 
 function getOutputDirectory(): string {
@@ -26,9 +25,12 @@ export async function writeIdentityCredentialArtifact(
   artifact: IdentityCredentialIssueResult,
 ): Promise<string> {
   const directory = await prepareOutputDirectory();
-  const outputFile = path.join(
-    directory,
-    `credential-${Date.now()}-${randomUUID()}.json`,
-  );
-  return writeCredentialFile(outputFile, artifact, false);
+  const store = new Conf<IdentityCredentialIssueResult>({
+    projectName: 'link-cli',
+    cwd: directory,
+    configName: 'current',
+    configFileMode: 0o600,
+  });
+  store.store = artifact;
+  return store.path;
 }

@@ -105,9 +105,7 @@ it('prints a non-secret TTY confirmation and saves the credential', async () => 
   }>;
   expect(view.type).toBe(SavedArtifact);
   expect(view.props.message).toBe('Identity credential saved');
-  expect(view.props.outputFile).toContain(
-    '.link-cli/credentials/current.json',
-  );
+  expect(view.props.outputFile).toContain('.link-cli/credentials/current.json');
   expect(view.props.details).toEqual([
     { label: 'Expires', value: '2026-09-18T00:00:00Z' },
   ]);
